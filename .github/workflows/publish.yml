@@ -1,0 +1,48 @@
+name: Publish to PyPI
+
+# Dormant by design -- NOTHING here runs on a push. It builds and publishes the
+# package only when a GitHub Release is published (the deliberate "we're ready"
+# action), or when dispatched manually. It uses PyPI Trusted Publishing, so it
+# also stays inert until a trusted publisher is configured on PyPI for this
+# repository + workflow (https://docs.pypi.org/trusted-publishers/). Until then
+# the publish step has no credentials and cannot upload.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: publish to PyPI (trusted publishing)
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/keck-ao-performance-estimator
+    permissions:
+      id-token: write            # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keck-ao-performance-estimator"
+dynamic = ["version"]
+description = "Estimate W. M. Keck Observatory adaptive-optics NGS / LGS / LTAO Strehl and FWHM across a night from MASS/DIMM seeing."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "W. M. Keck Observatory AO group" },
+    { name = "Eduardo Marin" },
+]
+maintainers = [{ name = "Eduardo Marin" }]
+keywords = [
+    "astronomy",
+    "adaptive optics",
+    "Keck",
+    "Strehl",
+    "wavefront error budget",
+    "laser guide star",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "astropy",
+    "pillow",
+]
+
+# The GUI needs a Qt binding; the CLI/engine does not. Install with
+#   pip install keck-ao-performance-estimator[gui]
+# to pull it in. PyQt5 also works (see qtcompat.py) if PyQt6 is unavailable.
+# astroquery drives the field map's guide-star catalogue lookups (Vizier); it
+# is imported lazily so the CLI/engine and the offline tests never need it.
+[project.optional-dependencies]
+gui = ["PyQt6", "astroquery"]
+dev = ["pytest", "ruff"]
+docs = ["mkdocs", "mkdocs-material"]
+
+[project.urls]
+Homepage = "https://github.com/KeckObservatory/keck-ao-performance-estimator"
+Repository = "https://github.com/KeckObservatory/keck-ao-performance-estimator"
+Issues = "https://github.com/KeckObservatory/keck-ao-performance-estimator/issues"
+
+[project.scripts]
+keck-ao-estimator = "keck_ao_estimator.cli:_cli"
+keck-ao-estimator-gui = "keck_ao_estimator.gui.app:main"
+
+# The 2026 package refactor migrated the engine/GUI code,
+# module by module, into the src/keck_ao_estimator package; the historical
+# flat scripts (ao_strehl_timeline.py, ao_strehl_gui.py, sr_estimator/
+# _version.py) are gone. qtcompat.py stays flat (a small, standalone Qt-
+# binding shim, not part of the migration) and a small data package
+# (keck_ao_docs) rides alongside sr_estimator/ to carry the bundled
+# documentation PDFs.
+[tool.setuptools]
+py-modules = ["qtcompat"]
+packages = [
+    "keck_ao_docs", "keck_ao_estimator", "keck_ao_estimator.gui",
+    "keck_ao_estimator.gui.tabs",
+]
+
+[tool.setuptools.package-dir]
+"" = "sr_estimator"
+"keck_ao_estimator" = "src/keck_ao_estimator"
+
+[tool.setuptools.package-data]
+keck_ao_docs = ["*.pdf"]
+keck_ao_estimator = ["data/*.fits.gz", "data/*.zip"]
+
+[tool.setuptools.dynamic]
+version = { attr = "keck_ao_estimator._version.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "gui: exercises the PyQt GUI (offscreen; needs a Qt binding installed)",
+    "slow: slower end-to-end checks (harness, full gui_phase scripts)",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+extend-exclude = ["sr_estimator/regress/ref", "sr_estimator/regress/test", "*.ipynb"]
+
+[tool.ruff.lint]
+# Start narrow: correctness-leaning rule sets only (unused imports/vars, bugbear
+# footguns, undefined names). Style/formatting rules are deliberately deferred
+# to avoid a giant reformat-only diff across a ~7k-line codebase in one pass.
+select = ["E9", "F", "B"]
+ignore = [
+    "F841",  # local var assigned but unused -- common in the plotting code for
+             # readability (named intermediates); revisit per-module later
+]

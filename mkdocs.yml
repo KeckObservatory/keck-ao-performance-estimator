@@ -1,0 +1,43 @@
+site_name: Keck AO Performance Estimator
+site_description: >-
+  Estimate W. M. Keck Observatory adaptive-optics NGS / LGS / LTAO Strehl and
+  FWHM across a night from Mauna Kea MASS/DIMM seeing.
+repo_url: https://github.com/KeckObservatory/keck-ao-performance-estimator
+repo_name: keck-ao-performance-estimator
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.top
+    - navigation.sections
+    - content.code.copy
+    - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Usage: usage.md
+  - Development: development.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite

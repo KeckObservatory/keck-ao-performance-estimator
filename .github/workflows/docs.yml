@@ -1,0 +1,45 @@
+name: Docs
+
+# Builds the MkDocs site on every push to master so a broken docs build is
+# caught in CI. It does NOT publish on a push: the site is only DEPLOYED to
+# GitHub Pages when this workflow is run manually (workflow_dispatch) -- so it
+# stays ready-but-dormant until you choose to publish (and until Pages is
+# enabled: repo Settings -> Pages -> Source: "GitHub Actions").
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install mkdocs mkdocs-material
+      - run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: deploy (manual only)
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

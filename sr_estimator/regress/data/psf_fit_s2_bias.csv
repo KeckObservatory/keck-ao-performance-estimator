@@ -1,0 +1,505 @@
+sr,halo_beta,contrast_mag,sep_arcsec,bias_default,bias_psf_clean,epsf_tag,refusal_note
+0.15,4.765,0.0,0.1,-0.06603943820103564,0.013911958468783375,strict,
+0.15,4.765,0.0,0.15,-0.06153022628561687,0.0037179192911044323,strict,
+0.15,4.765,0.0,0.2,-0.07128009532204123,0.007789522088817863,strict,
+0.15,4.765,0.0,0.3,-0.07351728796442364,0.007701299845863291,strict,
+0.15,4.765,0.0,0.45,-0.07296885115491125,0.0007455272347009212,strict,
+0.15,4.765,0.0,0.6,-0.06643922365436827,0.011526468326207712,strict,
+0.15,4.765,0.0,0.8,-0.05821776443784944,0.006639884650382122,strict,
+0.15,4.765,0.0,1.0,-0.01885475033625103,0.005422022465238485,strict,
+0.15,4.765,0.0,1.2,0.17372157108273326,0.018918687437144227,strict,
+0.15,4.765,0.0,0.1,-0.061610069593318925,0.012503667783342998,strict,
+0.15,4.765,0.0,0.15,-0.0652243605899496,-0.011501475828722657,strict,
+0.15,4.765,0.0,0.2,-0.07620805540819864,-0.0006459996508572652,strict,
+0.15,4.765,0.0,0.3,-0.07503868678274411,0.002496621204622629,strict,
+0.15,4.765,0.0,0.45,-0.07164846155190473,0.009311629889535683,strict,
+0.15,4.765,0.0,0.6,-0.06102248488303466,0.022284436460844687,strict,
+0.15,4.765,0.0,0.8,-0.058028864874511046,0.00021884333496716146,strict,
+0.15,4.765,0.0,1.0,-0.0171106300539548,0.0069726891963313165,strict,
+0.15,4.765,0.0,1.2,0.10593197094062226,-0.006177522293543541,strict,
+0.15,4.765,0.0,0.1,-0.07055515675343636,0.008923321080758134,strict,
+0.15,4.765,0.0,0.15,-0.0750460843366182,-0.00038140195494634765,strict,
+0.15,4.765,0.0,0.2,-0.08144618013941726,-0.011412852031799037,strict,
+0.15,4.765,0.0,0.3,-0.0752985105204975,0.0029893411691087612,strict,
+0.15,4.765,0.0,0.45,-0.07676696689519756,-0.0014360390277891877,strict,
+0.15,4.765,0.0,0.6,-0.07422648224350391,-0.0037767925492644405,strict,
+0.15,4.765,0.0,0.8,-0.05797859585829082,0.00452976314887385,strict,
+0.15,4.765,0.0,1.0,-0.020624814045774015,0.004020747484218573,strict,
+0.15,4.765,0.0,1.2,0.1436193093222113,0.010723463231459895,strict,
+0.15,4.765,1.0,0.1,-0.0421856314965105,-0.0016302285714132891,strict,
+0.15,4.765,1.0,0.15,-0.04267093025462783,-5.681564683565621e-05,strict,
+0.15,4.765,1.0,0.2,-0.04626996537860564,-0.00406075209744855,strict,
+0.15,4.765,1.0,0.3,-0.03253218147665751,0.014789336074854137,strict,
+0.15,4.765,1.0,0.45,-0.040541859579139014,0.001374187031442431,strict,
+0.15,4.765,1.0,0.6,-0.031969767861401654,0.010786935501518102,strict,
+0.15,4.765,1.0,0.8,-0.024009606197147565,0.009811087321162204,strict,
+0.15,4.765,1.0,1.0,0.006682124254392796,0.018386974693628294,strict,
+0.15,4.765,1.0,1.2,0.06158826296580683,0.02056380334741667,strict,
+0.15,4.765,1.0,0.1,-0.03884133725759503,0.006656015784503255,strict,
+0.15,4.765,1.0,0.15,-0.04475327676204614,-0.005616900718944773,strict,
+0.15,4.765,1.0,0.2,-0.03819264318662953,0.0072260285288100745,strict,
+0.15,4.765,1.0,0.3,-0.039059782113918126,0.00734776970065304,strict,
+0.15,4.765,1.0,0.45,-0.036752240435588626,0.007739836849819076,strict,
+0.15,4.765,1.0,0.6,-0.03005807785950665,0.013553358015964079,strict,
+0.15,4.765,1.0,0.8,-0.03754156354681604,-0.0089104205558172,strict,
+0.15,4.765,1.0,1.0,-0.007132634303671559,0.002976629608796466,strict,
+0.15,4.765,1.0,1.2,0.027146269813155988,-0.0048536420944387815,strict,
+0.15,4.765,1.0,0.1,-0.047681846995216756,-0.009405527291853066,strict,
+0.15,4.765,1.0,0.15,-0.03888031316504585,0.007874348480883725,strict,
+0.15,4.765,1.0,0.2,-0.04374673233487848,-0.0014782699516380227,strict,
+0.15,4.765,1.0,0.3,-0.03354556244623279,0.018040709118654463,strict,
+0.15,4.765,1.0,0.45,-0.03665896107687458,0.009271655586601285,strict,
+0.15,4.765,1.0,0.6,-0.034511756862069434,0.006026626905507565,strict,
+0.15,4.765,1.0,0.8,-0.03709883596860608,-0.008200834206624652,strict,
+0.15,4.765,1.0,1.0,-0.013837021122385912,-0.004347711485517047,strict,
+0.15,4.765,1.0,1.2,0.04038653244459653,0.005947903299044405,strict,
+0.15,4.765,2.0,0.1,-0.023595194761279553,-0.00211327180727211,strict,
+0.15,4.765,2.0,0.15,-0.017621976074896822,0.004812964148949217,strict,
+0.15,4.765,2.0,0.2,-0.014820616749414844,0.006164066351003944,strict,
+0.15,4.765,2.0,0.3,-0.021841856177256896,-0.0019987691103598992,strict,
+0.15,4.765,2.0,0.45,-0.009790849986829026,0.010320256758387408,strict,
+0.15,4.765,2.0,0.6,-0.012797558751636462,0.006574653874561354,strict,
+0.15,4.765,2.0,0.8,-0.010061883447027437,0.005490537898867359,strict,
+0.15,4.765,2.0,1.0,-0.00392251166038593,4.887776613490824e-05,strict,
+0.15,4.765,2.0,1.2,0.01132229275288335,-0.001392032651447772,strict,
+0.15,4.765,2.0,0.1,-0.022684686860938608,-0.0022309665490721775,strict,
+0.15,4.765,2.0,0.15,-0.014024010362451128,0.0060802758494280795,strict,
+0.15,4.765,2.0,0.2,-0.020753608700616183,-0.0017233023188212016,strict,
+0.15,4.765,2.0,0.3,-0.007761624738714529,0.013510084959915403,strict,
+0.15,4.765,2.0,0.45,-0.009770722030975648,0.014172850876011944,strict,
+0.15,4.765,2.0,0.6,-0.020831514575275017,-0.0012599451741399648,strict,
+0.15,4.765,2.0,0.8,-0.012990442932607288,0.00028645155421863633,strict,
+0.15,4.765,2.0,1.0,0.00322867369173363,0.00799474654771365,strict,
+0.15,4.765,2.0,1.2,-0.0018912543418244387,-0.011280641319695583,strict,
+0.15,4.765,2.0,0.1,-0.024147440540706555,-0.004712514243496446,strict,
+0.15,4.765,2.0,0.15,-0.013467214705567165,0.008897736002390966,strict,
+0.15,4.765,2.0,0.2,-0.01604103058250561,0.009348007925786744,strict,
+0.15,4.765,2.0,0.3,-0.014564584003793069,0.006512293984785311,strict,
+0.15,4.765,2.0,0.45,-0.015723424864835245,0.004384084526171644,strict,
+0.15,4.765,2.0,0.6,-0.015163253286908124,0.006086435594661377,strict,
+0.15,4.765,2.0,0.8,-0.013790188146974913,0.0003721406706448105,strict,
+0.15,4.765,2.0,1.0,0.0015825940951577355,0.006041076380899013,strict,
+0.15,4.765,2.0,1.2,0.022446766205872992,0.011061290298509246,strict,
+0.15,4.765,3.0,0.1,-0.004529652964948866,0.006769061487129552,strict,
+0.15,4.765,3.0,0.15,-0.007505727512120669,0.0023005213531791247,strict,
+0.15,4.765,3.0,0.2,-0.008925899198245824,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.3,-0.012006988272224545,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.45,-0.008417175656811715,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.6,-0.008755108687698576,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.8,-0.008712886938138986,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,1.0,-0.013766136561332604,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,1.2,0.01882458303804435,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.1,-0.009484404638949784,-0.00010864229429496941,strict,
+0.15,4.765,3.0,0.15,-0.006004080147203966,0.004536822014805014,strict,
+0.15,4.765,3.0,0.2,-0.004166726303263563,0.00467277371739952,strict,
+0.15,4.765,3.0,0.3,-0.00361013036623109,,strict,cleaning refused: every candidate was either dropped by the fit or saturated (0 saturated of 1)
+0.15,4.765,3.0,0.45,-0.0025478604080072242,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.6,-0.011698503763775236,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.8,-0.0031941693155891904,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,1.0,-0.005427619154428326,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,1.2,-0.00021595323464054794,-0.004127939624824661,strict,
+0.15,4.765,3.0,0.1,-0.004326148829922188,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.15,-0.006741662515637514,0.0028585561663470593,strict,
+0.15,4.765,3.0,0.2,-0.007651965412341755,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.3,0.0031241638334597033,0.013867432899689974,strict,
+0.15,4.765,3.0,0.45,0.006855320822647171,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.6,-0.007298009116489257,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,0.8,-0.014379230990261449,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,1.0,-0.009743271836149536,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,3.0,1.2,0.01546672280748998,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.1,-0.007801602529287716,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.15,-0.0009551509087543097,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.2,-0.0023100179144263655,-0.0010997093246489509,strict,
+0.15,4.765,4.0,0.3,0.0035750921987898754,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.45,-0.002384789167631185,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.6,-0.008509682129683616,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.8,-0.012272063688339913,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,1.0,0.0009164548925105209,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,1.2,0.013158233747968956,0.014019684831720863,strict,
+0.15,4.765,4.0,0.1,-0.011543666935024288,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.15,0.00490968969950592,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.2,0.0020743206940125047,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.3,0.0013508331620968317,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.45,0.010704697836053961,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.6,0.0016867054067885856,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.8,-0.004529010689291291,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,1.0,-0.00523716315134834,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,1.2,0.006214697211525733,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.1,0.002007656379373418,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.15,-0.004938443205154547,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.2,-0.0027556934555231505,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.3,0.002887981346337859,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.45,-0.017251468594448288,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,0.6,-0.014261299225649948,-0.010944368421143852,strict,
+0.15,4.765,4.0,0.8,-0.0036299476234274985,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,1.0,0.020439589208987807,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,4.0,1.2,0.007215158851528375,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.1,-0.001083402710449377,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.15,0.00710411723733706,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.2,-0.0030724886722466316,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.3,0.004479153985515266,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.45,-0.0029313984234151935,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.6,0.014844398257727098,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.8,-0.0022114558610584756,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,1.0,0.009705638033310676,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,1.2,0.003123296980501622,0.005632795134071861,strict,
+0.15,4.765,5.0,0.1,0.0036074560082295926,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.15,-0.0055409294278967736,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.2,0.0005654459112994226,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.3,-0.005936655153174264,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.45,-0.0021993095514431793,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.6,0.00454201690920894,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.8,-0.006519866361794663,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,1.0,0.011304496852769741,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,1.2,0.0018789389179623972,0.0033214784439997147,strict,
+0.15,4.765,5.0,0.1,-0.00017036851891918947,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.15,-0.003755452053557762,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.2,0.005336514837970152,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.3,0.008276920468214571,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.45,0.004399427133541439,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.6,0.004907090822841215,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,0.8,0.005268550371826081,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,1.0,-8.743164708308049e-06,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.15,4.765,5.0,1.2,0.005281843218156612,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,0.0,0.1,-0.14766661788829255,0.001933956148696958,strict,
+0.3,4.765,0.0,0.15,-0.129723245897015,0.0032852375757130847,strict,
+0.3,4.765,0.0,0.2,-0.14452874612713193,0.02044271060184011,strict,
+0.3,4.765,0.0,0.3,-0.1486469884845433,0.0034776013512645143,strict,
+0.3,4.765,0.0,0.45,-0.1516257127573117,-0.007791839389935662,strict,
+0.3,4.765,0.0,0.6,-0.14419674710402425,-0.0046050296514090205,strict,
+0.3,4.765,0.0,0.8,-0.1282738182363866,-0.0036416841179181536,strict,
+0.3,4.765,0.0,1.0,-0.05165119482502445,0.0077247804138732,strict,
+0.3,4.765,0.0,1.2,0.383984616400273,0.017948577008840838,strict,
+0.3,4.765,0.0,0.1,-0.13647055237393044,0.007729608861267945,strict,
+0.3,4.765,0.0,0.15,-0.1423436433507204,-0.015454491865621534,strict,
+0.3,4.765,0.0,0.2,-0.15415201605119536,-0.012134329300197477,strict,
+0.3,4.765,0.0,0.3,-0.14749788803974517,0.009610544703082202,strict,
+0.3,4.765,0.0,0.45,-0.1422038890113687,0.02181898627789275,strict,
+0.3,4.765,0.0,0.6,-0.14034148454759318,0.00186875040135287,strict,
+0.3,4.765,0.0,0.8,-0.13170649973244214,-0.013253521231887666,strict,
+0.3,4.765,0.0,1.0,-0.06775225533344612,-0.018221248361664666,strict,
+0.3,4.765,0.0,1.2,0.29380912712000845,0.0004012668059232838,strict,
+0.3,4.765,0.0,0.1,-0.12785542446980278,0.002317076990493605,strict,
+0.3,4.765,0.0,0.15,-0.13549410447747914,-0.006026652426668833,strict,
+0.3,4.765,0.0,0.2,-0.1447018624514893,0.01621529988608983,strict,
+0.3,4.765,0.0,0.3,-0.14420164300959584,0.019077134445914135,strict,
+0.3,4.765,0.0,0.45,-0.15355730966688091,-0.014636465262201526,strict,
+0.3,4.765,0.0,0.6,-0.15196495118959608,-0.02494732849247744,strict,
+0.3,4.765,0.0,0.8,-0.12085393219827295,0.017281857924615285,strict,
+0.3,4.765,0.0,1.0,-0.04398545038348883,0.012702832962187605,strict,
+0.3,4.765,0.0,1.2,0.41556837719183587,0.006811040545217306,strict,
+0.3,4.765,1.0,0.1,-0.08412738232916395,0.0014805564665427151,strict,
+0.3,4.765,1.0,0.15,-0.07169479734228348,0.025589548587982403,strict,
+0.3,4.765,1.0,0.2,-0.0963489986313264,-0.018977642090167335,strict,
+0.3,4.765,1.0,0.3,-0.08745756145995631,0.0022344809667012577,strict,
+0.3,4.765,1.0,0.45,-0.07820811782387099,0.009728550507686173,strict,
+0.3,4.765,1.0,0.6,-0.08075477843333598,-0.0010764802284211061,strict,
+0.3,4.765,1.0,0.8,-0.06386821174002638,0.003636508342481637,strict,
+0.3,4.765,1.0,1.0,-0.01825238055668954,0.006865336388487464,strict,
+0.3,4.765,1.0,1.2,0.08642810586824212,-0.0002196079814987817,strict,
+0.3,4.765,1.0,0.1,-0.08487848140254348,0.0016602290679232357,strict,
+0.3,4.765,1.0,0.15,-0.08831883460031367,-0.009798434880197604,strict,
+0.3,4.765,1.0,0.2,-0.08460654995588734,0.00429543153021944,strict,
+0.3,4.765,1.0,0.3,-0.08402891329278969,0.0011188783729663143,strict,
+0.3,4.765,1.0,0.45,-0.08638920361974795,-0.00438966309345451,strict,
+0.3,4.765,1.0,0.6,-0.08049444473410353,-0.0032203674831005613,strict,
+0.3,4.765,1.0,0.8,-0.06988760482632578,-0.006737492544530821,strict,
+0.3,4.765,1.0,1.0,-0.04254528720649864,-0.021418806955530723,strict,
+0.3,4.765,1.0,1.2,0.06440315609119379,-0.012529459223764028,strict,
+0.3,4.765,1.0,0.1,-0.08456203950181612,-0.004965477694907128,strict,
+0.3,4.765,1.0,0.15,-0.07954436967792769,0.006776540284998911,strict,
+0.3,4.765,1.0,0.2,-0.08797565776337785,-0.004086322133381115,strict,
+0.3,4.765,1.0,0.3,-0.06506403615101239,0.034302826311978285,strict,
+0.3,4.765,1.0,0.45,-0.08186720617214846,0.007281769388372772,strict,
+0.3,4.765,1.0,0.6,-0.07704488638835086,0.004558896881379337,strict,
+0.3,4.765,1.0,0.8,-0.07291952960105558,-0.01000345104229955,strict,
+0.3,4.765,1.0,1.0,-0.03857373637710215,-0.012770476193416924,strict,
+0.3,4.765,1.0,1.2,0.11303049491127976,0.0235912551745317,strict,
+0.3,4.765,2.0,0.1,-0.04338061417152461,-0.005515794523594408,strict,
+0.3,4.765,2.0,0.15,-0.050790832851474677,-0.012896569941008296,strict,
+0.3,4.765,2.0,0.2,-0.05248897319502366,-0.013819067117400885,strict,
+0.3,4.765,2.0,0.3,-0.0389811177101132,0.0013614237454891986,strict,
+0.3,4.765,2.0,0.45,-0.049860630558624885,-0.011583196478024471,strict,
+0.3,4.765,2.0,0.6,-0.023890707885472928,0.016772863134440208,strict,
+0.3,4.765,2.0,0.8,-0.019461676173668507,0.01494663210856495,strict,
+0.3,4.765,2.0,1.0,-0.0051109595237607275,0.0054216176220286405,strict,
+0.3,4.765,2.0,1.2,0.07222930034449271,0.03759953038771763,strict,
+0.3,4.765,2.0,0.1,-0.0325217364063386,0.0054402230558148745,strict,
+0.3,4.765,2.0,0.15,-0.037196043177731786,0.005315250749506284,strict,
+0.3,4.765,2.0,0.2,-0.035062771626104106,0.0037758783453690214,strict,
+0.3,4.765,2.0,0.3,-0.01548350771531637,0.03217242222207084,strict,
+0.3,4.765,2.0,0.45,-0.029217897120488168,0.015289635368803012,strict,
+0.3,4.765,2.0,0.6,-0.049312861508544636,-0.015033532439850839,strict,
+0.3,4.765,2.0,0.8,-0.03353025415110289,-0.004930299424461437,strict,
+0.3,4.765,2.0,1.0,-0.03113909546599386,-0.022408420493692738,strict,
+0.3,4.765,2.0,1.2,0.018455780137689504,-0.008081492339903684,strict,
+0.3,4.765,2.0,0.1,-0.034596861290849046,0.00461029971587007,strict,
+0.3,4.765,2.0,0.15,-0.031573827547132116,0.011197707610540064,strict,
+0.3,4.765,2.0,0.2,-0.055849257194083096,-0.018455193089040145,strict,
+0.3,4.765,2.0,0.3,-0.025449651014586905,0.020056409807768127,strict,
+0.3,4.765,2.0,0.45,-0.021729086997705926,0.023705931706551997,strict,
+0.3,4.765,2.0,0.6,-0.03684169453387948,0.0003809213505656106,strict,
+0.3,4.765,2.0,0.8,-0.03623345992640303,-0.00803169410772403,strict,
+0.3,4.765,2.0,1.0,-0.03959694689431181,-0.031200666920414732,strict,
+0.3,4.765,2.0,1.2,0.0370826779641385,0.008849920382103693,strict,
+0.3,4.765,3.0,0.1,-0.0152161341164479,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,3.0,0.15,-0.029841244402979084,-0.013877296511494053,strict,
+0.3,4.765,3.0,0.2,-0.03632175814940375,-0.02193895770806431,strict,
+0.3,4.765,3.0,0.3,-0.003414887710542436,0.014673059869999783,strict,
+0.3,4.765,3.0,0.45,-0.014915291264529507,0.005089438691351922,strict,
+0.3,4.765,3.0,0.6,-0.012972283422602093,0.004418634835922919,strict,
+0.3,4.765,3.0,0.8,-0.0246678953001202,-0.013230532817554874,strict,
+0.3,4.765,3.0,1.0,0.007279471523251757,0.01171836955784894,strict,
+0.3,4.765,3.0,1.2,0.05206049989842315,0.0379005208550251,strict,
+0.3,4.765,3.0,0.1,-0.012627853396519395,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,3.0,0.15,-0.0377672975536954,-0.021393629511857137,strict,
+0.3,4.765,3.0,0.2,-0.008106097315116079,0.008691977919643545,strict,
+0.3,4.765,3.0,0.3,-0.02382416039901669,-0.007381452224403673,strict,
+0.3,4.765,3.0,0.45,-0.030464417352614237,-0.01523689329197453,strict,
+0.3,4.765,3.0,0.6,-0.020623146812553117,-0.0037991275527778368,strict,
+0.3,4.765,3.0,0.8,-0.026967068408048245,-0.01575884929957072,strict,
+0.3,4.765,3.0,1.0,-0.0011233249284194335,0.0031205582897714246,strict,
+0.3,4.765,3.0,1.2,0.009354839882220634,-0.0015189559942308528,strict,
+0.3,4.765,3.0,0.1,-0.024202561806820067,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,3.0,0.15,-0.00647385918198623,0.01106403133350864,strict,
+0.3,4.765,3.0,0.2,-0.03144720734344941,-0.014788906844920624,strict,
+0.3,4.765,3.0,0.3,0.01857644939267583,0.041797518002122946,strict,
+0.3,4.765,3.0,0.45,0.0005636027365341079,0.017769230460770613,strict,
+0.3,4.765,3.0,0.6,-0.005500046939807879,0.011877759818046285,strict,
+0.3,4.765,3.0,0.8,-0.02333626251719839,-0.011128614304474593,strict,
+0.3,4.765,3.0,1.0,-0.028935315780027338,-0.025221097323530006,strict,
+0.3,4.765,3.0,1.2,0.02382472870228508,0.013801803397170964,strict,
+0.3,4.765,4.0,0.1,-0.00166072552775276,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.15,-0.008288199922432182,-0.006529073956668741,strict,
+0.3,4.765,4.0,0.2,-0.0033792200749175327,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.3,-0.0029271068643446085,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.45,-0.021612118306118366,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.6,-0.015139629450321324,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.8,-0.012911249217608,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,1.0,-0.008280901036483213,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,1.2,0.015959150060146032,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.1,-0.0166991345634126,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.15,-0.018236204412412638,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.2,0.000591538480742615,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.3,0.022193300122714976,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.45,-0.010346279542667092,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.6,-0.009823579847025643,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.8,-0.0074524717566474274,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,1.0,-0.012954496387383496,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,1.2,-0.011455680298499582,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.1,-0.014669562497003241,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.15,0.011629331222030526,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.2,-0.012423315689515158,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.3,-0.018777838177287065,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.45,-0.011223028472498175,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.6,-0.018919198330823006,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,0.8,-0.0004539801851092262,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,1.0,-0.009759839573964257,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,4.0,1.2,0.01713524929484217,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.1,0.0019987704042780385,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.15,-0.013806447606446504,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.2,0.00247503490151324,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.3,-0.004556446710106299,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.45,-0.002585346711642067,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.6,0.012399416034176713,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.8,0.008338030043005984,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,1.0,0.011033590683375227,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,1.2,0.011734085116827275,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.1,0.0018263996608174904,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.15,-0.03201110778449018,-0.03288559243230116,strict,
+0.3,4.765,5.0,0.2,0.008191601884683097,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.3,0.020681664321187843,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.45,0.002150997837332469,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.6,-0.001500484243153355,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.8,-0.004506660826985531,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,1.0,0.009944714468037297,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,1.2,0.018648002464116575,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.1,0.032663732474676965,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.15,-0.0020719091366092623,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.2,0.0018953409858717407,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.3,0.007465683945991397,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.45,0.008091047313418198,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.6,-0.004836730516939669,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,0.8,-0.0078935475880062,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,1.0,0.04066075672021713,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,4.765,5.0,1.2,-0.010187076636196835,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,0.0,0.1,-0.29651560014649686,-0.009637607562245187,strict,
+0.6,4.765,0.0,0.15,-0.26384466244621624,0.012124653665507967,strict,
+0.6,4.765,0.0,0.2,-0.30194904273011686,0.025802813675319336,strict,
+0.6,4.765,0.0,0.3,-0.2879658201522125,0.0501266837499591,strict,
+0.6,4.765,0.0,0.45,-0.31096597987182073,-0.04118708158315065,strict,
+0.6,4.765,0.0,0.6,-0.2875049921781163,0.007349124514230643,strict,
+0.6,4.765,0.0,0.8,-0.26445840665470705,0.035345240023811786,strict,
+0.6,4.765,0.0,1.0,-0.1364795430343833,0.017709486586072964,strict,
+0.6,4.765,0.0,1.2,1.6185989137826136,0.024742726939862902,strict,
+0.6,4.765,0.0,0.1,-0.27159232109545445,-0.016461280664553546,strict,
+0.6,4.765,0.0,0.15,-0.2562255621073919,0.06605237501568384,strict,
+0.6,4.765,0.0,0.2,-0.2951731653307567,0.04060536069982701,strict,
+0.6,4.765,0.0,0.3,-0.2951129076050123,0.039295165394072296,strict,
+0.6,4.765,0.0,0.45,-0.27945679843001364,0.06391114303071121,strict,
+0.6,4.765,0.0,0.6,-0.29232247850930554,-0.013156340479984707,strict,
+0.6,4.765,0.0,0.8,-0.27262228831718166,0.003727017466738536,strict,
+0.6,4.765,0.0,1.0,-0.12307511822716904,0.0449191841879536,strict,
+0.6,4.765,0.0,1.2,1.0795371751098979,-0.03300100355095681,strict,
+0.6,4.765,0.0,0.1,-0.26149703276865,0.022081084559396946,strict,
+0.6,4.765,0.0,0.15,-0.26480009855155495,0.02978685879645737,strict,
+0.6,4.765,0.0,0.2,-0.2967532834817052,0.047165106671858026,strict,
+0.6,4.765,0.0,0.3,-0.3050232557471524,0.007677850684294607,strict,
+0.6,4.765,0.0,0.45,-0.29682602421372445,-0.00586342696275477,strict,
+0.6,4.765,0.0,0.6,-0.29532950083121273,-0.027687027063961644,strict,
+0.6,4.765,0.0,0.8,-0.28820333962059497,-0.0360254178057865,strict,
+0.6,4.765,0.0,1.0,-0.15095376929424437,0.009444510690959307,strict,
+0.6,4.765,0.0,1.2,1.6355052824113798,0.03366446256965905,strict,
+0.6,4.765,1.0,0.1,-0.18518932904513274,-0.019721958312191035,strict,
+0.6,4.765,1.0,0.15,-0.1647852808986433,0.02000675139403696,strict,
+0.6,4.765,1.0,0.2,-0.17407131959532918,0.007718928811384584,strict,
+0.6,4.765,1.0,0.3,-0.15538323164741208,0.02925361612382582,strict,
+0.6,4.765,1.0,0.45,-0.18778137903131142,-0.03124375215870656,strict,
+0.6,4.765,1.0,0.6,-0.1499743218815882,0.027824684463903182,strict,
+0.6,4.765,1.0,0.8,-0.13187267252256718,0.03155774479490703,strict,
+0.6,4.765,1.0,1.0,-0.08496613251092366,-0.016189126825016276,strict,
+0.6,4.765,1.0,1.2,0.21116483419437126,-0.015054211794485073,strict,
+0.6,4.765,1.0,0.1,-0.17383000484074373,-0.0021857541165262173,strict,
+0.6,4.765,1.0,0.15,-0.1784693463074929,0.00038983299419792505,strict,
+0.6,4.765,1.0,0.2,-0.18767183071529803,-0.026861099256340615,strict,
+0.6,4.765,1.0,0.3,-0.16478744396022837,0.01824601884797694,strict,
+0.6,4.765,1.0,0.45,-0.15341415069121078,0.024165007877371192,strict,
+0.6,4.765,1.0,0.6,-0.1528218660358635,0.0159168399198103,strict,
+0.6,4.765,1.0,0.8,-0.11053959008162312,0.05872640761268244,strict,
+0.6,4.765,1.0,1.0,-0.06870536052000997,0.0010437431729382052,strict,
+0.6,4.765,1.0,1.2,0.22722004738299517,-0.0013118400725936619,strict,
+0.6,4.765,1.0,0.1,-0.17664451515842838,-0.01129899632518494,strict,
+0.6,4.765,1.0,0.15,-0.17531106849467576,0.008473088939356277,strict,
+0.6,4.765,1.0,0.2,-0.1508209957316664,0.04969390299884058,strict,
+0.6,4.765,1.0,0.3,-0.13829375546895856,0.06092290058036254,strict,
+0.6,4.765,1.0,0.45,-0.1719858585015573,-0.011851137753261964,strict,
+0.6,4.765,1.0,0.6,-0.1785732897264325,-0.034004413539534095,strict,
+0.6,4.765,1.0,0.8,-0.13069245461338796,0.03083899787973232,strict,
+0.6,4.765,1.0,1.0,-0.06097397771626545,0.003963469718029855,strict,
+0.6,4.765,1.0,1.2,0.28036050560927217,0.029672615464729435,strict,
+0.6,4.765,2.0,0.1,-0.10107973801446468,-0.023162545435596815,strict,
+0.6,4.765,2.0,0.15,-0.10936602411159013,-0.0371097539012073,strict,
+0.6,4.765,2.0,0.2,-0.08358601579760516,0.0030935383481962564,strict,
+0.6,4.765,2.0,0.3,-0.07035560661210183,0.019424834096464227,strict,
+0.6,4.765,2.0,0.45,-0.07820570227206114,-0.00015307749251713965,strict,
+0.6,4.765,2.0,0.6,-0.05266534397288769,0.031597119674152796,strict,
+0.6,4.765,2.0,0.8,-0.01983662946303777,0.06218528684391744,strict,
+0.6,4.765,2.0,1.0,-0.006390657088157448,0.02224343171150256,strict,
+0.6,4.765,2.0,1.2,0.0772989463910263,-0.0011196904619554804,strict,
+0.6,4.765,2.0,0.1,-0.06066969420801971,0.03440615171479855,strict,
+0.6,4.765,2.0,0.15,-0.07869371752049881,0.011623363427729516,strict,
+0.6,4.765,2.0,0.2,-0.09909759800062967,-0.017274356154053483,strict,
+0.6,4.765,2.0,0.3,-0.07069393171760374,0.015059274882908258,strict,
+0.6,4.765,2.0,0.45,-0.090543662893117,-0.013847819880556167,strict,
+0.6,4.765,2.0,0.6,-0.017048062091848393,0.08065202261971938,strict,
+0.6,4.765,2.0,0.8,-0.10940264207586392,-0.04654711956146851,strict,
+0.6,4.765,2.0,1.0,-0.05960160068883513,-0.03220697536918382,strict,
+0.6,4.765,2.0,1.2,0.05838939232999962,-0.01301349023204379,strict,
+0.6,4.765,2.0,0.1,-0.08478277652931787,-0.005483211858916426,strict,
+0.6,4.765,2.0,0.15,-0.08450436184724808,-0.002557846913360029,strict,
+0.6,4.765,2.0,0.2,-0.08296487630130867,0.00693679206266018,strict,
+0.6,4.765,2.0,0.3,-0.055942849831724595,0.037235896681951264,strict,
+0.6,4.765,2.0,0.45,-0.07889781654430628,-8.936747823651281e-05,strict,
+0.6,4.765,2.0,0.6,-0.0870213498573994,-0.015080364560702608,strict,
+0.6,4.765,2.0,0.8,-0.04251422904844426,0.033267248535955196,strict,
+0.6,4.765,2.0,1.0,-0.03001110059375134,-0.0003774637079723142,strict,
+0.6,4.765,2.0,1.2,0.07512707890856196,9.245536356450312e-05,strict,
+0.6,4.765,3.0,0.1,-0.05595775900248012,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,3.0,0.15,-0.03702263155748686,0.0018823774185835473,strict,
+0.6,4.765,3.0,0.2,-0.03435006113604522,-0.0018008983080707308,strict,
+0.6,4.765,3.0,0.3,-0.020790461226413703,0.018466370755545025,strict,
+0.6,4.765,3.0,0.45,-0.0029655976212437096,0.035328244963897415,strict,
+0.6,4.765,3.0,0.6,-0.019229747768896965,0.01666671596944347,strict,
+0.6,4.765,3.0,0.8,-0.053260397998580955,-0.023468290691900373,strict,
+0.6,4.765,3.0,1.0,-0.002495719742949043,0.009436290698594196,strict,
+0.6,4.765,3.0,1.2,0.08471155502127325,0.0527452117466094,strict,
+0.6,4.765,3.0,0.1,-0.02508746877561796,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,3.0,0.15,-0.03191970374312092,0.00631493114279047,strict,
+0.6,4.765,3.0,0.2,-0.06091520434635689,-0.026684264407043745,strict,
+0.6,4.765,3.0,0.3,-0.009794820279340533,0.0317057715404776,strict,
+0.6,4.765,3.0,0.45,-0.06113006496969742,-0.030091438186365393,strict,
+0.6,4.765,3.0,0.6,0.04137396896382872,0.08084304696840516,strict,
+0.6,4.765,3.0,0.8,-0.0745365733540524,-0.047171160814632795,strict,
+0.6,4.765,3.0,1.0,-0.04214375016030392,-0.02944649324041604,strict,
+0.6,4.765,3.0,1.2,-0.010531338049568406,-0.035659233858710726,strict,
+0.6,4.765,3.0,0.1,-0.03472269155471841,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,3.0,0.15,-0.06159943606982221,-0.023546946230732613,strict,
+0.6,4.765,3.0,0.2,-0.027460624955994772,0.011183309370538796,strict,
+0.6,4.765,3.0,0.3,-0.008879292425389207,0.031885316441926936,strict,
+0.6,4.765,3.0,0.45,-0.06404280789506678,-0.03311693496152368,strict,
+0.6,4.765,3.0,0.6,-0.05441595137708155,-0.02329258192417516,strict,
+0.6,4.765,3.0,0.8,-0.017295328229079088,0.01389657494724661,strict,
+0.6,4.765,3.0,1.0,0.009080187255389172,0.02183111606606003,strict,
+0.6,4.765,3.0,1.2,0.0629032623077187,0.028188086714581617,strict,
+0.6,4.765,4.0,0.1,-0.03186723137019032,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,0.15,-0.007886915054858612,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,0.2,-0.0002875504272699114,0.014871165394058306,strict,
+0.6,4.765,4.0,0.3,-0.008824312103748677,0.005826408970915797,strict,
+0.6,4.765,4.0,0.45,-0.04854824628717269,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,0.6,0.019518124599372855,0.0348917052763994,strict,
+0.6,4.765,4.0,0.8,-0.007892719167050255,0.0037618068044372732,strict,
+0.6,4.765,4.0,1.0,-0.03347486334932315,-0.02961599576337648,strict,
+0.6,4.765,4.0,1.2,0.008763819358236113,-0.0032129401833733695,strict,
+0.6,4.765,4.0,0.1,-0.024898547987995734,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,0.15,-0.02863342522625678,-0.014007888616396347,strict,
+0.6,4.765,4.0,0.2,0.00718081429990769,0.022973247455802648,strict,
+0.6,4.765,4.0,0.3,-0.03282173808829636,-0.018079281430868566,strict,
+0.6,4.765,4.0,0.45,-0.017210630209784084,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,0.6,-0.0035458322789445607,0.012586336801743037,strict,
+0.6,4.765,4.0,0.8,-0.02027337721096978,-0.009695918714306861,strict,
+0.6,4.765,4.0,1.0,-0.011597051643983503,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,1.2,-0.00037235626805165456,-0.010456350742451659,strict,
+0.6,4.765,4.0,0.1,-0.03192027831831401,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,0.15,-0.02495351994514361,-0.008975173029439176,strict,
+0.6,4.765,4.0,0.2,-0.00975213668891084,0.006080140018434599,strict,
+0.6,4.765,4.0,0.3,0.007127979148046859,0.020930047729070922,strict,
+0.6,4.765,4.0,0.45,-0.028634650849874377,-0.01763378504964208,strict,
+0.6,4.765,4.0,0.6,-0.005626594516992212,0.00977597975143829,strict,
+0.6,4.765,4.0,0.8,-0.012017620061765877,0.00021706215119199346,strict,
+0.6,4.765,4.0,1.0,-0.014067727561131949,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,4.0,1.2,-0.0156896690033399,-0.026989595929588384,strict,
+0.6,4.765,5.0,0.1,0.0017238716155753009,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.15,0.013527011371512576,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.2,-0.01802974923808398,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.3,-0.020807029654629106,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.45,0.025495555835269967,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.6,0.0101541971359983,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.8,-0.0019462228800752879,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,1.0,-0.005169631490133164,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,1.2,0.015098930701032631,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.1,0.023681594145284035,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.15,-0.029217572148330206,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.2,-0.04402130703436746,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.3,0.03285973439187062,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.45,-0.008671300100158597,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.6,-0.014252027057140904,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.8,0.009888353181436771,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,1.0,-0.03645611586508535,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,1.2,-0.012906869190136061,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.1,-0.0032573364216079703,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.15,-0.02177926657912488,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.2,-0.003889653522867631,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.3,0.013485988261464077,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.45,-0.02287879614467303,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.6,-0.03625975946105853,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,0.8,0.012634771780440146,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,1.0,0.00036592205699614855,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.6,4.765,5.0,1.2,0.045831075861205495,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,2.5,0.0,0.1,-0.16180462334693796,-0.008843249195543967,strict,
+0.3,2.5,0.0,0.15,-0.13261562841707855,0.007144120189364833,strict,
+0.3,2.5,0.0,0.2,-0.1627070088459785,-0.005119412592661521,strict,
+0.3,2.5,0.0,0.3,-0.16194704089901696,-0.011756833811546352,strict,
+0.3,2.5,0.0,0.45,-0.1540999256288514,-0.003453369720647359,strict,
+0.3,2.5,0.0,0.6,-0.14798180775472852,0.012966890867017689,strict,
+0.3,2.5,0.0,0.8,-0.13289059374155657,-0.0068469270277345395,strict,
+0.3,2.5,0.0,1.0,-0.059931061520729245,0.0005215331624702779,strict,
+0.3,2.5,0.0,1.2,0.30452127142244223,-0.011188010892609068,strict,
+0.3,2.5,3.0,0.1,-0.010498336902979633,,strict,"0 neighbours above the 0.1% contamination floor within 1.4"" -- nothing to subtract (the star is effectively isolated)"
+0.3,2.5,3.0,0.15,-0.03162783167211991,-0.015793300297687773,strict,
+0.3,2.5,3.0,0.2,0.0009222418025245371,0.022122443606612308,strict,
+0.3,2.5,3.0,0.3,-0.014891209880095235,0.0023240556478951735,strict,
+0.3,2.5,3.0,0.45,-0.019240889146562024,-0.00039355035477367517,strict,
+0.3,2.5,3.0,0.6,-0.004362485856496345,0.012906701885103566,strict,
+0.3,2.5,3.0,0.8,0.011071400262407771,0.028139968037206975,strict,
+0.3,2.5,3.0,1.0,-0.012368697557580022,-0.008607751216944404,strict,
+0.3,2.5,3.0,1.2,0.045764304001729095,0.0331476817330939,strict,
