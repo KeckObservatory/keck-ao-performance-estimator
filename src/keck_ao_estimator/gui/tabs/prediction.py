@@ -201,14 +201,12 @@ class PredictionTabMixin:
     def _fm_args(self):
         """args for the field-map/terms prediction path: the cached run args
         when a run exists, else a fresh widget collection (collect_args is
-        pure widget-reading) with the TT sensor resolved the way
-        prepare_night would. None if the controls cannot be parsed."""
+        pure widget-reading, and resolves the TT sensor the way
+        prepare_night would). None if the controls cannot be parsed."""
         if self.args_cached is not None:
             return self.args_cached
         try:
-            a = self.collect_args("")
-            engine.resolve_tt_sensor(a)
-            return a
+            return self.collect_args("")
         except Exception:
             return None
 

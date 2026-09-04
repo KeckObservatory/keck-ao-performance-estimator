@@ -649,11 +649,22 @@ class FieldMapOverlaysMixin:
                      self.fm_metric.currentText()]
         sensor = self._tt_sensor_band()
         laser_xy = self._laser_xy()
-        fm_dvar = (self._ngs_delta_var(self.last_offsets, self.args_cached)
+        # rank for the CURRENT controls: args_cached lags a control edit until
+        # the debounced recompute/rerun lands (e.g. the TT sensor was just
+        # switched), and the sensor band shown in the status line comes from
+        # the widget -- so the args' resolved sensor must come from the
+        # widgets too (collect_args is pure widget-reading, as in
+        # recompute_and_draw). Found 2026-09-04 once collect_args started
+        # resolving the sensor; before that every ranking was silently STRAP.
+        try:
+            args = self.collect_args(self.args_cached.out)
+        except Exception:
+            args = self.args_cached
+        fm_dvar = (self._ngs_delta_var(self.last_offsets, args)
                   if (mode == "ngs" and self.last_offsets) else 0.0)
         with engine.budget_overrides(**self.last_offsets):
             ranked = engine.rank_guide_stars(
-                self.args_cached, self.prep, snap, mode, stars, laser_xy,
+                args, self.prep, snap, mode, stars, laser_xy,
                 sensor, metric=metric, ngs_delta_var=fm_dvar)
         self._gs_ranking = ranked
         n_ok = sum(1 for e in ranked if e["rank"] is not None)

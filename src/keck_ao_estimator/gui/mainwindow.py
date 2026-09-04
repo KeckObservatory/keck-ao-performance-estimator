@@ -544,6 +544,17 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         tomo = self.tomo_combo.currentText()
         a.tomography = (None if tomo.startswith("auto")
                         else (tomo == "on"))
+        # Resolve the TT sensor onto the derived attributes the engine reads
+        # (args._tt_sensor_base / _tt_wfs_band). prepare_night does this in
+        # place on the Run's args, but recompute_and_draw replaces args_cached
+        # with a fresh collection on every recompute -- without this, every
+        # consumer that reads getattr(args, "_tt_sensor_base", "strap")
+        # (compute_timeline, the field map, the terms tab) silently fell back
+        # to STRAP with TRICK selected (found 2026-09-04: the prediction field
+        # map changed the moment a night was loaded). The band swap inside the
+        # resolver is a no-op here: a.band already comes from the widget,
+        # which the LGS tab's dichroic logic keeps in the complementary band.
+        engine.resolve_tt_sensor(a)
         return a
 
     # ---- run ----------------------------------------------------------------
