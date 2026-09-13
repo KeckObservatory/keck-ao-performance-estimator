@@ -718,9 +718,12 @@ def open8_checks():
     (SEED+486 target 19) with ok=True. Neither collapses the flux (ratio
     > 1 and 0.81), so rule (b) never fired. Both must now refuse with the
     "<= 0" note. FS-E2 measured every earlier target of each frame first,
-    in truth order, and the ePSF model a target receives depends on which
-    position first requested its 1-arcsec bin; so these two checks replay
-    that order and test the measurement FS-E2 actually made."""
+    in truth order, and these two checks replay that order. Before parallel
+    PR-D9 the ePSF model a target received depended on which position first
+    requested its 1-arcsec bin, so the replay was needed to test the
+    measurement FS-E2 actually made; since PR-D9 the model is weighted at the
+    bin centre and the order no longer changes it (the replay is kept, and
+    still refuses both targets)."""
     print("OPEN-8 -- unphysical cleaned result is refused:")
     params = synth.synth_params()
     flat = engine.load_nirc2_calibration()[0]

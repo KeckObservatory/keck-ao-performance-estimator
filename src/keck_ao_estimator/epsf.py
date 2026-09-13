@@ -509,7 +509,11 @@ class EmpiricalPsf:
 
         x=y=None returns the unweighted field model.  Results are cached
         on position rounded to 1 arcsec, so `measure_field` pays the
-        recombination once per neighbourhood, not once per star.
+        recombination once per neighbourhood, not once per star.  The
+        weights are evaluated at the CENTRE of that 1-arcsec bin, not at
+        (x, y) itself (parallel PR-D9), so a bin holds one model whichever
+        position asks first and a per-target result does not depend on
+        measurement order (fieldsolve FS-OPEN-3).
         """
         fixed = self.__dict__.get("_fixed_model")
         if fixed is not None:
@@ -528,7 +532,9 @@ class EmpiricalPsf:
         if key is None:
             w = np.ones(len(self.donors))
         else:
-            d = np.array([np.hypot(dn.x - x, dn.y - y)
+            # PR-D9: the bin centre, not (x, y) -- see the docstring
+            cx, cy = key[0] * bin_px, key[1] * bin_px
+            d = np.array([np.hypot(dn.x - cx, dn.y - cy)
                           for dn in self.donors])
             w = 1.0 / (1.0 + (d / self.weight_scale_px) ** 2)
         grid_n = 2 * int(np.ceil(self.r_stamp_px)) * self.oversample + 1

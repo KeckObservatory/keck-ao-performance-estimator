@@ -139,14 +139,14 @@ def _model_at(epsf, x=None, y=None):
     """`EmpiricalPsf.at(x, y)`'s model, computed WITHOUT reading or writing
     the ePSF's own cache (FS-D13).
 
-    `at()` caches on position rounded to 1 arcsec, and the model stored for
-    a bin is the one weighted at whichever position asked FIRST.  A field
-    solution that asked for its own positions would therefore change the
-    model every later `clean_star` in the same bin receives -- measured:
-    the shipped per-target measurement of 2 of 7 targets on one frame moved
-    by up to 2.3e-3 SR after a solve on the same ePSF.  This is the same
-    recombination as `at()` (same weights, same `_assemble`, same
-    `_make_model`), just never stored there."""
+    `at()` caches on position rounded to 1 arcsec and, since parallel PR-D9,
+    weights the donors at the centre of that bin, so the model for a bin is
+    one value whichever position asks.  This is the same recombination (same
+    bin, same bin-centre weights, same `_assemble`, same `_make_model`), just
+    never stored in the cache; regress (e) asserts the two stay bit-equal.
+    FS-D13's reason for keeping it out of the cache (before PR-D9 a solve
+    moved later shipped measurements by up to 2.3e-3 SR) no longer applies;
+    installing the solve's models is a separate, identity-checked change."""
     from .epsf import _assemble, _make_model
     fixed = epsf.__dict__.get("_fixed_model")
     if fixed is not None:
@@ -156,7 +156,10 @@ def _model_at(epsf, x=None, y=None):
     if x is None or y is None:
         w = np.ones(len(epsf.donors))
     else:
-        d = np.array([np.hypot(dn.x - x, dn.y - y) for dn in epsf.donors])
+        kx, ky = _bin_key(epsf, x, y)
+        bin_px = 1000.0 / float(epsf.plate_scale_mas)
+        cx, cy = kx * bin_px, ky * bin_px
+        d = np.array([np.hypot(dn.x - cx, dn.y - cy) for dn in epsf.donors])
         w = 1.0 / (1.0 + (d / epsf.weight_scale_px) ** 2)
     grid_n = 2 * int(np.ceil(epsf.r_stamp_px)) * epsf.oversample + 1
     g, _cov, _nf = _assemble(epsf.donors, w, grid_n, epsf.oversample,

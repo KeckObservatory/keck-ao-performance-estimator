@@ -173,12 +173,15 @@ def s5_sparse_convergence_checks():
 
 def side_effect_checks():
     """FS-D13: a field solution must not change the SHIPPED measurement of
-    any star measured after it. `EmpiricalPsf.at` caches the model for a
-    1-arcsec bin from whichever position asks first, so a solve that asked
-    for its own positions changed later clean_star results (caught by the
-    FS-E1 driver's cross-tree identity check: 2 of 7 targets on this frame,
-    up to 2.3e-3 SR). A moderate-density frame, not a registered FS-E1
-    seed; its own ePSF."""
+    any star measured after it. Before parallel PR-D9, `EmpiricalPsf.at`
+    cached the model for a 1-arcsec bin from whichever position asked first,
+    so a solve that asked for its own positions changed later clean_star
+    results (caught by the FS-E1 driver's cross-tree identity check: 2 of 7
+    targets on this frame, up to 2.3e-3 SR). Since PR-D9 every bin's model
+    is weighted at the bin centre, so the guarantee holds by construction;
+    the check stays, together with the cache-untouched assertion (the solve
+    still never writes `at()`'s cache). A moderate-density frame, not a
+    registered FS-E1 seed; its own ePSF."""
     params, flat = _calibration()
     raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + 200))[0]
     work = _work(raw, flat)
@@ -217,9 +220,10 @@ def model_at_equality_checks():
     """(e) `field_solve._model_at` is a line-for-line copy of
     `EmpiricalPsf.at` that never touches the cache (FS-D13). A copy can
     drift, so the two are compared bit-exact on a fresh ePSF at several
-    positions, including the unweighted model. `at()` returns whatever
-    position first requested a 1-arcsec bin, so its cache is cleared
-    before each request to make it compute at exactly that position."""
+    positions, including the unweighted model. Since parallel PR-D9 both
+    weight the donors at the centre of the position's 1-arcsec bin; `at()`'s
+    cache is cleared before each request so every comparison is a fresh
+    computation, not a model cached by an earlier position."""
     print("field_solve (e) -- _model_at == EmpiricalPsf.at, bit-exact:")
     from keck_ao_estimator.field_solve import _model_at
     params, flat = _calibration()
