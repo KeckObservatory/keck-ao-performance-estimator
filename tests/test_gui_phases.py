@@ -100,6 +100,14 @@ def test_psf_fit_model_script():
 
 
 @pytest.mark.slow
+def test_field_solve_model_script():
+    """fieldsolve WP-1 skeleton: four named skip() stubs today (awaiting
+    Opus's O1 field_solve.py), still asserting the script itself runs
+    clean and exits 0 -- see field_solve_model.py's own docstring."""
+    _run(os.path.join(REGRESS, "field_solve_model.py"))
+
+
+@pytest.mark.slow
 def test_fwhm_srtool_model_script():
     """The 4th FWHM convention must stay the SR tool's own process --
     see fwhm_srtool_model.py."""
