@@ -835,6 +835,8 @@ def measure_strehl(image, params=None, header=None, pos=None,
         _why = None
         if strehl > PSF_FIT_UNPHYSICAL_SR_MAX:
             _why = f"cleaned SR {strehl:.2f} > {PSF_FIT_UNPHYSICAL_SR_MAX:g}"
+        elif strehl <= 0.0:
+            _why = f"cleaned SR {strehl:.2f} <= 0"
         elif (PSF_FIT_MIN_CLEAN_FLUX_FRAC is not None and f_u != 0.0
               and flux / f_u < PSF_FIT_MIN_CLEAN_FLUX_FRAC):
             _why = (f"cleaned aperture flux fell to "

@@ -711,7 +711,16 @@ def open8_checks():
     6.5743 there with ok=True and cleaned=True (truth 0.305). Each must now
     come back refused with the note, and its number must be exactly the
     psf_clean=False measurement -- a refusal keeps the uncleaned result,
-    never a third value. Two frames, cheap enough for the default run."""
+    never a third value. Two frames, cheap enough for the default run.
+
+    FS-OPEN-5 adds rule (a)'s lower bound: fieldsolve FS-E2's shipped arm
+    came back CLEANED at SR -0.8206 (SEED+444 target 21) and -1.1774
+    (SEED+486 target 19) with ok=True. Neither collapses the flux (ratio
+    > 1 and 0.81), so rule (b) never fired. Both must now refuse with the
+    "<= 0" note. FS-E2 measured every earlier target of each frame first,
+    in truth order, and the ePSF model a target receives depends on which
+    position first requested its 1-arcsec bin; so these two checks replay
+    that order and test the measurement FS-E2 actually made."""
     print("OPEN-8 -- unphysical cleaned result is refused:")
     params = synth.synth_params()
     flat = engine.load_nirc2_calibration()[0]
@@ -737,6 +746,39 @@ def open8_checks():
                   "(== psf_clean=False, bit-exact)",
                   r.ok and r0.ok and r.strehl == r0.strehl and r.flux == r0.flux,
                   f"SR {r.strehl:.6f} vs {r0.strehl:.6f}")
+
+    # FS-OPEN-5: cleaned SR <= 0, replayed in FS-E2's per-target order
+    for off, tid in ((444, 21), (486, 19)):
+        raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + off))[0]
+        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+        ep = engine.build_epsf(work, params)
+        if not ep.usable:
+            check(f"OPEN-8 SEED+{off}: field ePSF usable", False, ep.note)
+            continue
+        cat = engine.deep_star_catalog(work, params)
+        r = None
+        for t in truth["target_ids"]:
+            s = truth["stars"][t]
+            rt = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
+                                       psf_clean=True, robust_sky=True, epsf=ep,
+                                       star_catalog=cat)
+            if t == tid:
+                r = rt
+                break
+        s = truth["stars"][tid]
+        r0 = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
+                                   robust_sky=True)
+        check(f"OPEN-8 SEED+{off} t{tid}: cleaned SR <= 0 refused as unphysical",
+              r is not None and r.ok and not r.cleaned
+              and r.psf_clean_note.startswith("cleaning REFUSED: unphysical result")
+              and "<= 0" in r.psf_clean_note,
+              f"cleaned={getattr(r, 'cleaned', None)} note "
+              f"{getattr(r, 'psf_clean_note', '')[:70]!r}")
+        check(f"OPEN-8 SEED+{off} t{tid}: uncleaned number stands "
+              "(== psf_clean=False, bit-exact)",
+              r is not None and r.ok and r0.ok and r.strehl == r0.strehl
+              and r.flux == r0.flux,
+              f"SR {getattr(r, 'strehl', float('nan')):.6f} vs {r0.strehl:.6f}")
 
 
 # ------------------------------------------------------------------- main

@@ -118,8 +118,13 @@ PSF_FIT_SR_VALIDATED_MAX = 0.30
 # Unphysical-result guard (OPEN-8), enforced in `measure_strehl` where SR
 # is known.  A cleaning is REFUSED -- the uncleaned measurement stands,
 # `cleaned=False`, the note names the reason -- when (a) the cleaned
-# Strehl exceeds PSF_FIT_UNPHYSICAL_SR_MAX, or (b) the cleaned aperture
-# flux falls below PSF_FIT_MIN_CLEAN_FLUX_FRAC of the uncleaned one.
+# Strehl exceeds PSF_FIT_UNPHYSICAL_SR_MAX or is <= 0, or (b) the cleaned
+# aperture flux falls below PSF_FIT_MIN_CLEAN_FLUX_FRAC of the uncleaned
+# one.  (a)'s lower bound was added after (b) was shown not to cover it: a
+# cleaning can drive the PEAK above sky negative without collapsing the
+# flux (one subtracted neighbour, flux ratio 0.81 or even > 1), and two
+# moderate-density synthetic targets came back cleaned at SR -0.82 and
+# -1.18 with ok=True.
 # Why it exists: on synthetic moderate-density fields (truth SR 0.305) the
 # unguarded path returned SR 6.2-6.6 with ok=True and cleaned=True -- the
 # cleaned aperture flux collapsed while the peak survived, the forbidden
