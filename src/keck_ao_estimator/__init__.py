@@ -99,6 +99,10 @@ from .epsf import (
     EpsfDonor, EpsfModel, StarCatalog, build_epsf, deep_star_catalog,
     donor_candidates, epsf_strehl, estimate_psf_shape, theoretical_psf,
 )
+from .field_solve import (
+    FIELD_SOLVE_AMP_FLOOR_SIGMA, FIELD_SOLVE_MAX_GROUP, FieldSolution,
+    SolvedStar, field_clean, solve_field,
+)
 from .psf_fit import (
     PSF_FIT_FOOTPRINT_FWHM, PSF_FIT_MAX_NEIGHBOURS,
     PSF_FIT_NEIGHBOUR_FLOOR_FRAC, PSF_FIT_POS_TOL_FWHM,

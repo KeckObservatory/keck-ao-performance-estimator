@@ -620,7 +620,8 @@ def measure_strehl(image, params=None, header=None, pos=None,
                    peak_radius_arcsec=NIRC2_PEAK_RADIUS_ARCSEC,
                    dl_psf=None, robust_sky=False, sky_override=None,
                    auto_radius=False, psf_clean=False, epsf=None,
-                   star_catalog=None):
+                   star_catalog=None, psf_clean_engine="native",
+                   field_solution=None):
     """Measure the Strehl of a reduced NIRC2 image (calc_and_display.pro).
 
     `image` should come from reduce_frame (or be otherwise reduced).  Give
@@ -636,6 +637,11 @@ def measure_strehl(image, params=None, header=None, pos=None,
     field (`measure_field` does).  With `psf_clean=False` -- the default --
     not one arithmetic operation below changes: the tool stays a
     byte-faithful port of the IDL widget (RULES Section 1).
+
+    `psf_clean_engine` picks how the neighbours are solved: "native" (the
+    default, per-target group fit) or "field" (one solution of the whole
+    frame, `field_solve`); `field_solution` shares a prebuilt one, as
+    `measure_field` does.
     """
     if params is None:
         if header is None:
@@ -724,7 +730,10 @@ def measure_strehl(image, params=None, header=None, pos=None,
             photometry_radius_arcsec=photometry_radius_arcsec,
             bg_inner_arcsec=bg_inner_arcsec,
             bg_outer_arcsec=bg_outer_arcsec, robust_sky=robust_sky,
-            sky_override=sky_override)
+            sky_override=sky_override,
+            **({} if psf_clean_engine == "native"
+               else dict(engine=psf_clean_engine,
+                         field_solution=field_solution)))
         if not _rep.cleaned:
             _clean = None
         elif auto_radius:
@@ -1129,7 +1138,7 @@ def field_consistent(results, k=2.5, sr_floor=0.05, fwhm_floor_frac=0.10):
 
 def measure_field(image, params, positions=None, n_stars=5,
                   exclude_px=None, dl_psf=None, psf_clean=False, epsf=None,
-                  star_catalog=None, **measure_kw):
+                  star_catalog=None, psf_clean_engine="native", **measure_kw):
     """Measure several stars across one frame -> a measured field map.
 
     positions given -> measure each; else find_stars supplies candidates
@@ -1173,6 +1182,16 @@ def measure_field(image, params, positions=None, n_stars=5,
     if psf_clean:
         measure_kw = dict(measure_kw, psf_clean=True, epsf=epsf,
                           star_catalog=star_catalog)
+        if psf_clean_engine != "native":
+            # the field solution is a property of the frame too: built
+            # once, on the same sigma-filtered array every measurement
+            # below uses, and shared
+            from .field_solve import solve_field
+            _fwork = sigma_filter3(np.asarray(image, dtype=float))
+            measure_kw = dict(
+                measure_kw, psf_clean_engine=psf_clean_engine,
+                field_solution=solve_field(_fwork, params, epsf,
+                                           star_catalog))
     # matched apertures: strehlone below is computed with the SAME
     # photrad as the star, so an optimized radius stays self-consistent
     cap = None

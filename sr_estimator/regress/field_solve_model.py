@@ -4,13 +4,9 @@ the check()/skip()/FAILURES pattern of psf_fit_model.py (and, before it,
 nirc2_model.py), run against the same synthetic battery
 (psf_fit_synth.py) plus a field-level solve.
 
-`field_solve.py` does not exist yet -- it is Opus's O1 (fieldsolve
-PLAN.md section 4/6). Every slot below is therefore a named `skip()`
-stub, not a real check: this is the SKELETON only (fieldsolve
-WORKORDER_SONNET.md, "Your task list" item 4 / WP-1), so this script is
-runnable and CI-green today, and Opus fills in the real assertions
-against `solve_field()` / `field_clean()` once they land, without
-restructuring anything here.
+Skeleton: Sonnet (WP-1). Assertions: Opus (O1), against `solve_field()` /
+`field_clean()` and the `engine="field"` dispatch in `clean_star` /
+`measure_strehl`.
 
 The four slots are FS-CP2's own acceptance criteria (fieldsolve
 CHECKPOINTS.md): a frame with nothing to clean is a no-op; a controlled
@@ -34,10 +30,34 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "src"))
 warnings.filterwarnings("ignore")
 
-import psf_fit_synth as synth  # noqa: F401 -- imported for Opus's O1 fill-in;
-                                # not yet used by the skip stubs below.
+import numpy as np
+
+import keck_ao_estimator as engine
+import psf_fit_synth as synth
 
 FAILURES = []
+_CACHE = {}
+
+
+def _calibration():
+    if "cal" not in _CACHE:
+        _CACHE["cal"] = (synth.synth_params(),
+                         engine.load_nirc2_calibration()[0])
+    return _CACHE["cal"]
+
+
+def _work(raw, flat):
+    return engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+
+
+def _donor_epsf_030():
+    """The sr 0.30 ePSF from the S2 clean-donor frame -- the same source
+    psf_fit_model.py's S2 surface uses. Built once."""
+    if "epsf030" not in _CACHE:
+        params, flat = _calibration()
+        raw, _truth = synth.build_s2_donor_frame(params, 0.30)
+        _CACHE["epsf030"] = engine.build_epsf(_work(raw, flat), params)
+    return _CACHE["epsf030"]
 
 
 def check(name, cond, detail=""):
@@ -60,8 +80,37 @@ def noop_isolated_star_checks():
     Build: `psf_fit_synth.build_s1(params)`.
     """
     print("field_solve (a) -- single isolated star is a no-op:")
-    skip("field_solve (a): isolated star, field_clean is a no-op",
-         "awaiting O1")
+    params, flat = _calibration()
+    raw, truth = synth.build_s1(params)[0]
+    reduced = engine.reduce_frame(raw, flat=flat)
+    work = engine.sigma_filter3(reduced)
+    target = next(s for s in truth["stars"] if s["role"] == "target")
+    pos = (target["x"], target["y"])
+    epsf = engine.build_epsf(work, params)
+    cat = engine.deep_star_catalog(work, params)
+    sol = engine.solve_field(work, params, epsf, cat)
+    check("field_solve (a): the S1 frame's solution converges",
+          sol.converged, sol.note)
+    # the S1 donors sit 340-484 px away, beyond the 282 px a stamp can
+    # reach into the aperture+annulus (FS-D12), so even scope="frame" has
+    # nothing to subtract
+    for scope in ("frame", "footprint"):
+        cleaned, rep = engine.clean_star(work, pos, params, epsf, catalog=cat,
+                                         engine="field", field_solution=sol,
+                                         field_scope=scope)
+        check(f"field_solve (a): scope={scope} refuses with the 0-components "
+              "note, array bit-exact",
+              not rep.cleaned and rep.engine == "field"
+              and rep.note.startswith("0 components to subtract")
+              and np.array_equal(cleaned, work),
+              f"note={rep.note!r}")
+    r0 = engine.measure_strehl(reduced, params=params, pos=pos)
+    r1 = engine.measure_strehl(reduced, params=params, pos=pos,
+                               psf_clean=True, psf_clean_engine="field")
+    check("field_solve (a): measure_strehl(psf_clean_engine='field') == "
+          "psf_clean=False (bit-exact)",
+          r0.ok and r1.ok and not r1.cleaned and r1.strehl == r0.strehl,
+          f"default={r0.strehl!r} field={r1.strehl!r}")
 
 
 # ------------------------------------------------------ (b) S2 pair, ±0.02
@@ -74,8 +123,35 @@ def s2_pair_checks():
     (or the single-pair equivalent Opus's O1 wires up).
     """
     print("field_solve (b) -- S2 pair at 0.45\" sr 0.30, cleaned within +/-0.02:")
-    skip("field_solve (b): S2 pair 0.45\" sr 0.30 cleaned |bias| <= 0.02",
-         "awaiting O1")
+    params, flat = _calibration()
+    epsf = _donor_epsf_030()
+    check("field_solve (b): sr 0.30 donor-frame ePSF usable", epsf.usable,
+          f"tag={epsf.tag!r}")
+    # one pair, contrast 0, seed SEED: the S2 surface's own frame builder
+    raw, truth = synth._s2_lattice_frame(params, 0.30, 0, (0.45,),
+                                         seed=synth.SEED)
+    work = _work(raw, flat)
+    cat = engine.deep_star_catalog(work, params)
+    tstar = truth["stars"][truth["pairs"][0]["target_id"]]
+    pos = (tstar["x"], tstar["y"])
+    sol = engine.solve_field(work, params, epsf, cat)
+    check("field_solve (b): the pair frame's solution converges",
+          sol.converged, sol.note)
+    cleaned, rep = engine.clean_star(work, pos, params, epsf, catalog=cat,
+                                     engine="field", field_solution=sol)
+    # measured exactly as psf_fit_model.py's S2 surface measures a cleaned
+    # pair, so the +/-0.02 means the same thing it means there
+    bias = float("nan")
+    if rep.cleaned:
+        r = engine.measure_strehl(cleaned, params=params, pos=pos)
+        if r.ok:
+            bias = r.strehl - truth["sr_truth_isolated"]
+    r_def = engine.measure_strehl(work, params=params, pos=pos)
+    check("field_solve (b): S2 pair 0.45\" sr 0.30 contrast 0 cleaned "
+          "|bias| <= 0.02 (scope=frame)",
+          rep.cleaned and abs(bias) <= 0.02,
+          f"bias={bias:+.4f} (uncleaned {r_def.strehl - truth['sr_truth_isolated']:+.4f}); "
+          f"{rep.note[:90]}")
 
 
 # --------------------------------------------------- (c) S5-sparse, <=3 sweeps
@@ -86,8 +162,28 @@ def s5_sparse_convergence_checks():
     Build: `psf_fit_synth.build_s5_sparse(params, n_noise=1)`.
     """
     print("field_solve (c) -- 20-star S5-sparse frame converges in <= 3 sweeps:")
-    skip("field_solve (c): S5-sparse frame converges, n_sweeps <= 3",
-         "awaiting O1")
+    f = _s5_sparse()
+    sol = engine.solve_field(f["work"], f["params"], f["epsf"], f["cat"])
+    check("field_solve (c): S5-sparse frame converges, n_sweeps <= 3",
+          sol.converged and sol.n_sweeps <= 3,
+          f"{sol.note}; per-sweep change "
+          f"{tuple(round(c, 4) for c in sol.max_rel_change)}")
+
+
+def _s5_sparse():
+    """The S5-sparse frame with the sr 0.30 donor-frame ePSF. Its own ePSF
+    is uncalibrated (too few usable donors), and solve_field correctly
+    refuses to build on that, so (c) and (d) supply the clean-donor model
+    -- the S2 surface's convention (fieldsolve STATUS, FS-CP2 slot note)."""
+    if "s5sparse" not in _CACHE:
+        params, flat = _calibration()
+        raw, truth = synth.build_s5_sparse(params)[0]
+        work = _work(raw, flat)
+        _CACHE["s5sparse"] = dict(
+            params=params, raw=raw, truth=truth, work=work,
+            epsf=_donor_epsf_030(),
+            cat=engine.deep_star_catalog(work, params))
+    return _CACHE["s5sparse"]
 
 
 # ------------------------------------------------ (d) non-convergence refusal
@@ -100,8 +196,45 @@ def non_convergence_refusal_checks():
     unconverged solution.
     """
     print("field_solve (d) -- a non-converging frame refuses legibly:")
-    skip("field_solve (d): non-converging frame refuses, never a silent fallback",
-         "awaiting O1")
+    f = _s5_sparse()
+    params, work, epsf, cat = f["params"], f["work"], f["epsf"], f["cat"]
+    # one sweep and an unreachable tolerance: the solve cannot converge
+    sol = engine.solve_field(work, params, epsf, cat, max_sweeps=1, tol=1e-12)
+    check("field_solve (d): solution reports NOT converged, naming the "
+          "sweep and the change",
+          not sol.converged
+          and sol.note.startswith("field solution did not converge")
+          and "at sweep 1" in sol.note,
+          sol.note)
+    truth = f["truth"]
+    pos = None
+    for tid in truth["target_ids"]:
+        s = truth["stars"][tid]
+        if engine.measure_strehl(work, params=params, pos=(s["x"], s["y"])).ok:
+            pos = (s["x"], s["y"])
+            break
+    if pos is None:
+        check("field_solve (d): a measurable target exists on the frame",
+              False)
+        return
+    cleaned, rep = engine.clean_star(work, pos, params, epsf, catalog=cat,
+                                     engine="field", field_solution=sol)
+    check("field_solve (d): field_clean refuses with the non-convergence "
+          "note, array bit-exact",
+          not rep.cleaned
+          and rep.note.startswith("cleaning refused: field solution did "
+                                  "not converge")
+          and np.array_equal(cleaned, work),
+          f"note={rep.note[:110]!r}")
+    r0 = engine.measure_strehl(work, params=params, pos=pos)
+    r1 = engine.measure_strehl(work, params=params, pos=pos, psf_clean=True,
+                               epsf=epsf, star_catalog=cat,
+                               psf_clean_engine="field", field_solution=sol)
+    check("field_solve (d): no silent fallback -- measure_strehl keeps the "
+          "uncleaned number and says it refused",
+          r1.ok and not r1.cleaned and r1.strehl == r0.strehl
+          and "did not converge" in r1.psf_clean_note,
+          f"SR {r1.strehl!r} vs {r0.strehl!r}")
 
 
 # ------------------------------------------------------------------- main
@@ -127,7 +260,7 @@ def main():
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILURE(S): {FAILURES}")
         sys.exit(1)
-    print("\nfield_solve_model: all checks passed (4 skipped, awaiting O1)")
+    print("\nfield_solve_model: all checks passed")
 
 
 if __name__ == "__main__":

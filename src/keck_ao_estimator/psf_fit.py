@@ -229,6 +229,13 @@ class CleanReport:
     # pattern-match a human sentence to decide what to plot.
     exclude_from_field: bool = False
     neighbours: tuple = field(default=(), repr=False)
+    # which engine produced this report: "native" (this module's per-target
+    # group fit) or "field" (`field_solve.field_clean`, one solution of the
+    # whole frame).  The two counts below are the field engine's and stay 0
+    # for "native".
+    engine: str = "native"
+    n_solution_stars: int = 0
+    n_sweeps: int = 0
 
 
 def select_neighbours(catalog, pos, params, epsf_model, target_flux,
@@ -548,8 +555,16 @@ def clean_star(image, pos, params, epsf, *, catalog=None,
                floor_frac=PSF_FIT_NEIGHBOUR_FLOOR_FRAC,
                background="constant", subtract_saturated=False,
                max_subtracted_frac=PSF_FIT_MAX_SUBTRACTED_FRAC,
-               sigma_reject=PSF_FIT_SIGMA_REJECT, badmask=None):
+               sigma_reject=PSF_FIT_SIGMA_REJECT, badmask=None,
+               engine="native", field_solution=None, field_scope="frame"):
     """Subtract the target's neighbours.  Returns (cleaned_image, report).
+
+    `engine` selects how the neighbours are solved: "native" (the default,
+    the per-target group fit below, unchanged) or "field"
+    (`field_solve.field_clean` against one solution of every star in the
+    frame; pass `field_solution` to share one across a frame, otherwise it
+    is built here, and `field_scope` is "frame" or "footprint").  Anything
+    else raises.
 
     `image` is the SIGMA-FILTERED work array, full frame, and the return is
     a full-frame copy with only the fit footprint modified.  Full frame,
@@ -607,6 +622,22 @@ def clean_star(image, pos, params, epsf, *, catalog=None,
     that never claims a cleaner measurement than it delivered.
     `residual_frac` is 0.0 exactly when nothing was subtracted.
     """
+    if engine not in ("native", "field"):
+        raise ValueError(f"clean_star: unknown engine {engine!r} "
+                         "(expected 'native' or 'field')")
+    if engine == "field":
+        from .field_solve import field_clean, solve_field
+        if field_solution is None:
+            field_solution = solve_field(image, params, epsf, catalog,
+                                         badmask=badmask)
+        return field_clean(
+            image, field_solution, pos, params, epsf, scope=field_scope,
+            catalog=catalog, photometry_radius_arcsec=photometry_radius_arcsec,
+            bg_inner_arcsec=bg_inner_arcsec, bg_outer_arcsec=bg_outer_arcsec,
+            robust_sky=robust_sky, sky_override=sky_override,
+            subtract_saturated=subtract_saturated, floor_frac=floor_frac,
+            max_subtracted_frac=max_subtracted_frac)
+
     from .epsf import _box, _robust_sky, deep_star_catalog
 
     work = np.asarray(image, dtype=float)
