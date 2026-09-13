@@ -43,9 +43,13 @@ changes anything:
   those two cannot reach, a neighbour *inside* the photometry aperture. The frame's own empirical PSF is
   built from its isolated stars and fitted simultaneously to the target and its
   neighbours; the neighbours are subtracted before measuring. Validated to
-  |SR bias| ≤ 0.02 for Strehl ≤ 0.30; every cleaned measurement logs the
-  expected *direction* of the residual error, and above 0.30 it warns that the
-  value should be read as an upper bound.
+  |SR bias| ≤ 0.02 for Strehl ≤ 0.30 (S2 bias surface, target region sep ≥
+  0.3″ / contrast ≤ 3 mag: 20/20 cells met at Strehl 0.15, 24/24 at 0.30);
+  every cleaned measurement logs the expected *direction* of the residual
+  error, and above 0.30 it warns that the value should be read as an upper
+  bound — the shipped surface currently meets 15/24 of the same cells at
+  Strehl 0.60 (worst case +0.04), and degrades further above that; the full
+  table is in the private ledger.
 
   **Developmental.** The empirical PSF needs at least 4 isolated, well-exposed
   donor stars, and on the real NIRC2 frames tested so far — sparse standard
