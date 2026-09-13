@@ -8,7 +8,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "src"))
 from qtcompat import QtWidgets, QtCore
 import keck_ao_estimator.gui as gui
 DATA = os.path.join(HERE, "data")
-CEILING_MS = 900          # generous; the real path measures ~340 ms
+CEILING_MS = 1800 if os.environ.get("GITHUB_ACTIONS") else 900
+# fieldsolve FS-OPEN-4 part 2: hosted GitHub Actions runners are slower
+# and noisier than the ~340 ms the real path measures locally (a 930 ms
+# average tripped the local 900 ms ceiling on fieldsolve/engine 6f63b12,
+# CI run 34742081846); 2x under CI, unchanged (900 ms, generous already)
+# locally.
 
 
 def pump(cond, timeout=90):
