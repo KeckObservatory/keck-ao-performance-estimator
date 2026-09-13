@@ -1,10 +1,15 @@
 name: CI
 
+# fieldsolve P0-1 (2026-09-12): this used to trigger on `master` only, but
+# the estimator's default branch is `main` -- CI had never once run on the
+# public repo. Also covers the hotfix/**, fieldsolve/** and docs/** branch
+# prefixes this and the follow-on project push to, so their branches get a
+# real CI run before any cherry-pick to main.
 on:
   push:
-    branches: [master]
+    branches: [main, master, "hotfix/**", "fieldsolve/**", "docs/**"]
   pull_request:
-    branches: [master]
+    branches: [main, master]
 
 jobs:
   lint:
@@ -19,13 +24,17 @@ jobs:
       - run: ruff check .
 
   test:
-    name: pytest
+    name: pytest (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
       # Headless Qt (offscreen platform plugin) needs a handful of X11/EGL
       # shared libraries present even without a display -- PyQt6 wheels do
