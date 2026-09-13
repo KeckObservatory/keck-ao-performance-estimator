@@ -2,12 +2,16 @@ name: CI
 
 # fieldsolve P0-1 (2026-09-12): this used to trigger on `master` only, but
 # the estimator's default branch is `main` -- CI had never once run on the
-# public repo. Also covers the hotfix/**, fieldsolve/** and docs/** branch
-# prefixes this and the follow-on project push to, so their branches get a
-# real CI run before any cherry-pick to main.
+# public repo. Also covers the hotfix/**, fieldsolve/**, docs/** and
+# parallel/** branch prefixes this and the follow-on projects push to, so
+# their branches get a real CI run before any cherry-pick to main.
+# parallel PR-P0-3 (2026-09-13): added parallel/** -- same reasoning as
+# fieldsolve/** before it (parallel/p0-fix had no trigger at all until
+# this line existed).
 on:
   push:
-    branches: [main, master, "hotfix/**", "fieldsolve/**", "docs/**"]
+    branches: [main, master, "hotfix/**", "fieldsolve/**", "docs/**",
+              "parallel/**"]
   pull_request:
     branches: [main, master]
 
