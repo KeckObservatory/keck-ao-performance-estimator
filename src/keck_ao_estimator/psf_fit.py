@@ -115,6 +115,26 @@ PSF_FIT_MAX_SUBTRACTED_FRAC = 0.95
 # and neither invents its own.
 PSF_FIT_SR_VALIDATED_MAX = 0.30
 
+# Unphysical-result guard (OPEN-8), enforced in `measure_strehl` where SR
+# is known.  A cleaning is REFUSED -- the uncleaned measurement stands,
+# `cleaned=False`, the note names the reason -- when (a) the cleaned
+# Strehl exceeds PSF_FIT_UNPHYSICAL_SR_MAX, or (b) the cleaned aperture
+# flux falls below PSF_FIT_MIN_CLEAN_FLUX_FRAC of the uncleaned one.
+# Why it exists: on synthetic moderate-density fields (truth SR 0.305) the
+# unguarded path returned SR 6.2-6.6 with ok=True and cleaned=True -- the
+# cleaned aperture flux collapsed while the peak survived, the forbidden
+# direction (D27) with no bound -- and PSF_FIT_MAX_SUBTRACTED_FRAC never
+# fired (subtracted fraction 0.66-0.86).  (a) is physics.  (b)'s threshold
+# was derived on a 48-field battery as the largest value that refuses every
+# target biased above +0.30 that (a) leaves and no target within |bias|
+# 0.05, then validated unchanged on 24 disjoint fields.  Derived value
+# 0.2062 (the lowest ratio of any |bias| < 0.05 target; the highest
+# tail ratio left by (a) was 0.1047), shipped floored to 0.206 -- no
+# measured target lies in between.  (b) also catches what (a) cannot: a
+# negative cleaned SR (-1.00) and a negative cleaned flux.
+PSF_FIT_UNPHYSICAL_SR_MAX = 1.0
+PSF_FIT_MIN_CLEAN_FLUX_FRAC = 0.206
+
 # Which way the residual error runs, and why the user must be told (D27,
 # Eduardo 2026-07-31: "an underestimation is always preferred to an
 # overestimation ... as long as it is clear to the user that the likely

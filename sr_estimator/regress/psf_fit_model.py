@@ -18,7 +18,9 @@ invoked). The S2 bias surface and S3 field comparison, plus S4b/S4c and
 S5-moderate/extreme, are behind --full: those build dozens of frames or
 several seeds and are not meant to run on every push. S6 (WP-7, D50) is
 the exception among the heavier S5/S6 machinery -- one fixed-seed
-crowded field, cheap enough to stay in the default run.
+crowded field, cheap enough to stay in the default run. So is OPEN-8
+(two fixed-seed moderate fields: an unphysical cleaned result is
+refused).
 
 Needs no network stubs (RULES section 4): everything here is local
 synthetic data plus the packaged K2 superflat/supermask pair -- no
@@ -698,6 +700,45 @@ def s4_checks(full=False):
                   f"tag={epsf_w.tag!r} note={epsf_w.note!r}")
 
 
+# ------------------------------------------------------------------ OPEN-8
+
+def open8_checks():
+    """OPEN-8: an unphysical cleaned result is REFUSED in measure_strehl.
+
+    The reproduction targets are moderate-density fields
+    (`build_s5_moderate`) at seed SEED+34 targets 1 and 6 and SEED+23
+    target 21. Before the guard the engine returned SR 6.5716 / 6.1982 /
+    6.5743 there with ok=True and cleaned=True (truth 0.305). Each must now
+    come back refused with the note, and its number must be exactly the
+    psf_clean=False measurement -- a refusal keeps the uncleaned result,
+    never a third value. Two frames, cheap enough for the default run."""
+    print("OPEN-8 -- unphysical cleaned result is refused:")
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    for off, tids in ((34, (1, 6)), (23, (21,))):
+        raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + off))[0]
+        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+        ep = engine.build_epsf(work, params)
+        if not ep.usable:
+            check(f"OPEN-8 SEED+{off}: field ePSF usable", False, ep.note)
+            continue
+        cat = engine.deep_star_catalog(work, params)
+        for tid in tids:
+            s = truth["stars"][tid]
+            pos = (s["x"], s["y"])
+            r = engine.measure_strehl(work, params=params, pos=pos, psf_clean=True,
+                                      robust_sky=True, epsf=ep, star_catalog=cat)
+            r0 = engine.measure_strehl(work, params=params, pos=pos, robust_sky=True)
+            check(f"OPEN-8 SEED+{off} t{tid}: cleaning refused as unphysical",
+                  r.ok and not r.cleaned
+                  and r.psf_clean_note.startswith("cleaning REFUSED: unphysical result"),
+                  f"cleaned={r.cleaned} SR {r.strehl:.4f} note {r.psf_clean_note[:70]!r}")
+            check(f"OPEN-8 SEED+{off} t{tid}: uncleaned number stands "
+                  "(== psf_clean=False, bit-exact)",
+                  r.ok and r0.ok and r.strehl == r0.strehl and r.flux == r0.flux,
+                  f"SR {r.strehl:.6f} vs {r0.strehl:.6f}")
+
+
 # ------------------------------------------------------------------- main
 
 def main():
@@ -709,7 +750,7 @@ def main():
     t_start = time.time()
     for name, fn in (("S1", s1_checks), ("S4", lambda: s4_checks(args.full)),
                      ("S5", lambda: s5_checks(args.full)),
-                     ("S6", s6_checks)):
+                     ("S6", s6_checks), ("OPEN-8", open8_checks)):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")

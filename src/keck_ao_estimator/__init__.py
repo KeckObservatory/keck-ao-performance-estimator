@@ -104,7 +104,8 @@ from .psf_fit import (
     PSF_FIT_NEIGHBOUR_FLOOR_FRAC, PSF_FIT_POS_TOL_FWHM,
     PSF_FIT_BIAS_SAFE_NOTE, PSF_FIT_BIAS_UNSAFE_NOTE,
     PSF_FIT_SIGMA_REJECT, PSF_FIT_SR_ENVELOPE_NOTE,
-    PSF_FIT_SR_VALIDATED_MAX, CleanReport, Neighbour, clean_star,
+    PSF_FIT_SR_VALIDATED_MAX, PSF_FIT_UNPHYSICAL_SR_MAX,
+    PSF_FIT_MIN_CLEAN_FLUX_FRAC, CleanReport, Neighbour, clean_star,
     component_footprint, group_fit, select_neighbours,
 )
 from .io import fetch_mkwc_files, load_mass_profile, load_seeing_series, parse_dt, parse_secs

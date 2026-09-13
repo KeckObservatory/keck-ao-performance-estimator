@@ -21,7 +21,7 @@ uses the raw sub-image maximum rather than a cubic-congrid upsample; auto
 bad-pixel detection (fix_image.pro) is not ported -- a bad-pixel mask is
 required for repair.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -821,6 +821,39 @@ def measure_strehl(image, params=None, header=None, pos=None,
         if f_u != 0.0 and strehlone != 0.0:
             sr_unclean = float((p_u / f_u) / strehlone)
         crowd_unclean = float(c_u)
+
+        # OPEN-8: a subtraction whose result is UNPHYSICAL is refused
+        # exactly like a clean_star refusal -- the uncleaned measurement
+        # stands and the note says why.  Unguarded, a moderate-density
+        # synthetic target (truth SR 0.305) came back at SR 6.5 with
+        # ok=True: the cleaned aperture flux collapsed under the surviving
+        # peak.  Constants and their derivation: psf_fit.py.  Only a
+        # cleaned measurement reaches this, so the default path is
+        # untouched.
+        from .psf_fit import (PSF_FIT_MIN_CLEAN_FLUX_FRAC,
+                              PSF_FIT_UNPHYSICAL_SR_MAX)
+        _why = None
+        if strehl > PSF_FIT_UNPHYSICAL_SR_MAX:
+            _why = f"cleaned SR {strehl:.2f} > {PSF_FIT_UNPHYSICAL_SR_MAX:g}"
+        elif (PSF_FIT_MIN_CLEAN_FLUX_FRAC is not None and f_u != 0.0
+              and flux / f_u < PSF_FIT_MIN_CLEAN_FLUX_FRAC):
+            _why = (f"cleaned aperture flux fell to "
+                    f"{100.0 * flux / f_u:.1f} % of uncleaned")
+        if _why is not None:
+            _kept = measure_strehl(
+                image, params=params, pos=pos,
+                background_subtracted=background_subtracted,
+                photometry_radius_arcsec=_caller_photrad_arcsec,
+                bg_inner_arcsec=bg_inner_arcsec,
+                bg_outer_arcsec=bg_outer_arcsec,
+                peak_radius_arcsec=peak_radius_arcsec, dl_psf=dl_psf,
+                robust_sky=robust_sky, sky_override=sky_override,
+                auto_radius=auto_radius)
+            return replace(
+                _kept, epsf_tag=str(_rep.epsf_tag),
+                psf_clean_note=(f"cleaning REFUSED: unphysical result -- "
+                                f"{_why}; the uncleaned measurement is "
+                                "kept"))
 
     return Nirc2StrehlResult(
         strehl=float(strehl), fwhm_mas=float(fwhm_mas), wfe_nm=wfe_nm,
