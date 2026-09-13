@@ -25,13 +25,58 @@ SCRIPTS = sorted(
 )
 
 
+def _looks_like_crash(returncode, stdout, stderr):
+    """fieldsolve FS-OPEN-4: best-effort detection of a process CRASH
+    (segfault / access violation under headless Qt) as opposed to a real
+    assertion failure, which every script wired through `_run()` reports
+    via `sys.exit(1)` after printing a `[FAIL]` / `FAILURE(S)` line (or,
+    for the gui_phase*.py scripts, after printing whatever `[ok]` lines
+    it got through) -- always to STDOUT.
+
+    - POSIX: a NEGATIVE returncode means the process was killed by a
+      signal (e.g. -11 = SIGSEGV), which is exactly what was observed
+      for gui_phase12.py on hosted GitHub Actions runners (WP-1 CI run
+      34741109947, first attempt). This alone covers the observed case.
+    - Windows crashes surface differently (a large positive exit code,
+      no signal), so as a portable fallback: a nonzero returncode with
+      BOTH stdout and stderr empty is also treated as a crash -- the
+      process died before it could report anything at all.
+    - Deliberately NOT using "stderr empty" alone (the literal
+      suggestion in the brief): every script's own sys.exit(1) failure
+      path ALSO has empty stderr, since everything is printed to
+      stdout. Using stderr alone would retry genuine assertion
+      failures, which this must not do -- only empty STDOUT (nothing
+      reported at all) is a safe proxy for "the process never got to
+      report a real failure".
+    """
+    if returncode < 0:
+        return True
+    if returncode != 0 and not (stdout or "").strip() and not (stderr or "").strip():
+        return True
+    return False
+
+
 def _run(script):
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
-    r = subprocess.run(
-        [sys.executable, script], cwd=REGRESS, env=env,
-        capture_output=True, text=True, timeout=180,
-    )
+    # fieldsolve FS-OPEN-4: CI now runs on every push to the public repo
+    # (fieldsolve P0-1), so hosted-runner slowness gets a real ceiling
+    # instead of painting unrelated pushes red -- double the timeout
+    # under GITHUB_ACTIONS, unchanged locally.
+    timeout = 360 if os.environ.get("GITHUB_ACTIONS") else 180
+
+    def _once():
+        return subprocess.run(
+            [sys.executable, script], cwd=REGRESS, env=env,
+            capture_output=True, text=True, timeout=timeout,
+        )
+
+    r = _once()
+    if r.returncode != 0 and _looks_like_crash(r.returncode, r.stdout, r.stderr):
+        # One automatic retry, crash signature ONLY (FS-OPEN-4): a real
+        # assertion failure or meaningful stderr fails on the first
+        # attempt, no blanket retry.
+        r = _once()
     assert r.returncode == 0, (
         f"{os.path.basename(script)} failed:\n{r.stdout}\n{r.stderr}"
     )
