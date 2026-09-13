@@ -29,7 +29,7 @@ it, never a silent fallback to the per-target engine.
 Qt-free by rule (numpy/scipy only).
 """
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -74,7 +74,8 @@ class SolvedStar:
     x: float                    # solved position
     y: float
     amp: float                  # stamp flux in the psi convention
-    model_key: tuple            # epsf.at() cache key of the group's anchor
+    model_key: tuple            # the 1-arcsec bin its group's model was
+                                # built for (FieldSolution.models[group])
     group: int
     saturated: bool
     converged: bool             # its own last relative change <= tol
@@ -101,23 +102,45 @@ class FieldSolution:
     epsf_tag: str
     shape: tuple
     note: str
+    models: tuple = field(default=(), repr=False)   # EpsfModel per group
 
     @property
     def n_live(self):
         return sum(1 for s in self.stars if not s.dropped)
 
 
-def _model_key(epsf, x, y):
+def _bin_key(epsf, x, y):
     bin_px = 1000.0 / float(epsf.plate_scale_mas)
     return (round(float(x) / bin_px), round(float(y) / bin_px))
 
 
-def _model_for_key(epsf, key):
-    """The EpsfModel `epsf.at` cached under `key` (the anchor's 1-arcsec
-    bin).  Asking for the bin's own centre lands on the same key, so this
-    is a cache hit, never a second recombination."""
-    bin_px = 1000.0 / float(epsf.plate_scale_mas)
-    return epsf.at(key[0] * bin_px, key[1] * bin_px)
+def _model_at(epsf, x=None, y=None):
+    """`EmpiricalPsf.at(x, y)`'s model, computed WITHOUT reading or writing
+    the ePSF's own cache (FS-D13).
+
+    `at()` caches on position rounded to 1 arcsec, and the model stored for
+    a bin is the one weighted at whichever position asked FIRST.  A field
+    solution that asked for its own positions would therefore change the
+    model every later `clean_star` in the same bin receives -- measured:
+    the shipped per-target measurement of 2 of 7 targets on one frame moved
+    by up to 2.3e-3 SR after a solve on the same ePSF.  This is the same
+    recombination as `at()` (same weights, same `_assemble`, same
+    `_make_model`), just never stored there."""
+    from .epsf import _assemble, _make_model
+    fixed = epsf.__dict__.get("_fixed_model")
+    if fixed is not None:
+        return fixed
+    if not epsf.usable or not epsf.donors:
+        raise ValueError("ePSF is unusable (tag=%r)" % epsf.tag)
+    if x is None or y is None:
+        w = np.ones(len(epsf.donors))
+    else:
+        d = np.array([np.hypot(dn.x - x, dn.y - y) for dn in epsf.donors])
+        w = 1.0 / (1.0 + (d / epsf.weight_scale_px) ** 2)
+    grid_n = 2 * int(np.ceil(epsf.r_stamp_px)) * epsf.oversample + 1
+    g, _cov, _nf = _assemble(epsf.donors, w, grid_n, epsf.oversample,
+                             epsf.r_stamp_px, 3.0)
+    return _make_model(g, epsf.oversample, epsf.r_stamp_px, epsf.photrad_px)
 
 
 def _stamp(shape, model, x, y, amp):
@@ -207,7 +230,7 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
     if saturation is None:
         saturation = float(params.max_counts) * float(params.coadds)
 
-    fwhm = float(epsf.at().fwhm_px)
+    fwhm = float(_model_at(epsf).fwhm_px)
     r_comp = PSF_FIT_FOOTPRINT_FWHM * fwhm
     _sky, sky_sigma = _robust_sky(work)
     sky_sigma = float(sky_sigma) if sky_sigma and sky_sigma > 0 else 1.0
@@ -218,12 +241,18 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
     pk = np.array([float(c.get("peak", 0.0)) for c in catalog])
 
     groups, n_split = _groups(xc, yc, pk, 2.0 * r_comp, FIELD_SOLVE_MAX_GROUP)
-    keys, models = [], []
+    # one model per group, for the anchor's 1-arcsec bin, weighted at the
+    # bin centre so the answer does not depend on catalogue order; built
+    # here and kept in the solution, never in the ePSF's cache (FS-D13)
+    bin_px = 1000.0 / float(epsf.plate_scale_mas)
+    keys, models, by_key = [], [], {}
     group_of = np.zeros(n, dtype=int)
     for g, members in enumerate(groups):
-        key = _model_key(epsf, xc[members[0]], yc[members[0]])
+        key = _bin_key(epsf, xc[members[0]], yc[members[0]])
+        if key not in by_key:
+            by_key[key] = _model_at(epsf, key[0] * bin_px, key[1] * bin_px)
         keys.append(key)
-        models.append(_model_for_key(epsf, key))
+        models.append(by_key[key])
         for k in members:
             group_of[k] = g
 
@@ -346,7 +375,7 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
         n_split_groups=int(n_split), n_dropped=n_drop,
         n_failed_fits=tuple(fails), tol=float(tol),
         runtime_s=time.time() - t0, epsf_tag=tag, shape=tuple(shape),
-        note=note)
+        note=note, models=tuple(models))
 
 
 def field_clean(work, solution, pos, params, epsf, *, scope="frame",
@@ -424,6 +453,9 @@ def field_clean(work, solution, pos, params, epsf, *, scope="frame",
     if sky_sigma0 > 0.0:
         sky_sigma = sky_sigma0
 
+    # the one ePSF request `clean_star` itself makes for this target, so
+    # the footprint scope selects with exactly the model arm A selects with
+    # and the cache sees nothing a native call would not have done
     model_t = epsf.at(tx, ty)
     fwhm = float(model_t.fwhm_px)
     live = [k for k, s in enumerate(solution.stars) if not s.dropped]
@@ -481,8 +513,7 @@ def field_clean(work, solution, pos, params, epsf, *, scope="frame",
     cleaned = work.copy()
     for k in subtract:
         s = solution.stars[k]
-        sl, m = _stamp(work.shape, _model_for_key(epsf, s.model_key),
-                       s.x, s.y, s.amp)
+        sl, m = _stamp(work.shape, solution.models[s.group], s.x, s.y, s.amp)
         cleaned[sl] -= m
 
     # --- annulus contamination gate: clean_star's D16 formula, verbatim
@@ -516,7 +547,7 @@ def field_clean(work, solution, pos, params, epsf, *, scope="frame",
     in_ap = {}
     for k in subtract:
         s = solution.stars[k]
-        f = float(_model_for_key(epsf, s.model_key).evaluate_at(
+        f = float(solution.models[s.group].evaluate_at(
             apy, apx, s.x, s.y, amp=s.amp).sum())
         in_ap[k] = f
         sub_flux += f
@@ -540,7 +571,7 @@ def field_clean(work, solution, pos, params, epsf, *, scope="frame",
     res = cleaned[iy, ix] - sky0
     if target is not None:
         st = solution.stars[target]
-        res = res - _model_for_key(epsf, st.model_key).evaluate_at(
+        res = res - solution.models[st.group].evaluate_at(
             apy, apx, st.x, st.y, amp=st.amp)
     resid_abs = float(np.abs(res).sum())
     noise_floor = iy.size * sky_sigma * np.sqrt(2.0 / np.pi)

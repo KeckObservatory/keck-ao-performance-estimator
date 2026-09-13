@@ -168,6 +168,49 @@ def s5_sparse_convergence_checks():
           sol.converged and sol.n_sweeps <= 3,
           f"{sol.note}; per-sweep change "
           f"{tuple(round(c, 4) for c in sol.max_rel_change)}")
+    side_effect_checks()
+
+
+def side_effect_checks():
+    """FS-D13: a field solution must not change the SHIPPED measurement of
+    any star measured after it. `EmpiricalPsf.at` caches the model for a
+    1-arcsec bin from whichever position asks first, so a solve that asked
+    for its own positions changed later clean_star results (caught by the
+    FS-E1 driver's cross-tree identity check: 2 of 7 targets on this frame,
+    up to 2.3e-3 SR). A moderate-density frame, not a registered FS-E1
+    seed; its own ePSF."""
+    params, flat = _calibration()
+    raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + 200))[0]
+    work = _work(raw, flat)
+    cat = engine.deep_star_catalog(work, params)
+
+    def native(epsf):
+        out = []
+        for tid in truth["target_ids"]:
+            s = truth["stars"][tid]
+            r = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
+                                      psf_clean=True, robust_sky=True,
+                                      epsf=epsf, star_catalog=cat)
+            out.append((r.strehl, r.n_subtracted))
+        return out
+
+    ep_fresh = engine.build_epsf(work, params)
+    if not ep_fresh.usable:
+        check("field_solve (c'): side-effect frame builds a usable ePSF", False,
+              ep_fresh.note)
+        return
+    fresh = native(ep_fresh)
+    ep = engine.build_epsf(work, params)
+    keys0 = set(ep.__dict__.get("_model_cache", {}).keys())
+    engine.solve_field(engine.sigma_filter3(work), params, ep, cat)
+    keys1 = set(ep.__dict__.get("_model_cache", {}).keys())
+    check("field_solve (c'): solve_field leaves the ePSF's model cache untouched",
+          keys0 == keys1, f"{len(keys0)} -> {len(keys1)} cached models")
+    after = native(ep)
+    n_diff = sum(1 for a, b in zip(fresh, after) if a != b)
+    check("field_solve (c'): the shipped measurement after a field solve is "
+          "bit-identical to one without",
+          n_diff == 0, f"{n_diff} of {len(fresh)} targets differ")
 
 
 def _s5_sparse():
