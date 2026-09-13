@@ -94,6 +94,30 @@ def radius_map(shape, x, y):
     return np.hypot(xx[None, :], yy[:, None])
 
 
+def blank_disc(array, x, y, radius, value):
+    """In place: `array[radius_map(array.shape, x, y) <= radius] = value`,
+    evaluating distances only on the rows the disc can reach (parallel
+    design block D.3).
+
+    Identical by construction.  Each computed row is the same full-width
+    `hypot` over the same two coordinate vectors as `radius_map`'s (its
+    `yy` sliced, its `xx` whole), so every element evaluated is bit-equal
+    to `radius_map`'s value there; a skipped row lies more than `radius` +
+    1 pixel away along y, so none of its pixels can satisfy `<= radius`.
+    The catalogue builders blank one disc per detected peak, and a
+    full-frame map per peak dominated a real sparse frame (M15: 899 maps,
+    4.8 s of `measure_field`)."""
+    ny = array.shape[0]
+    y0 = max(int(np.floor(y - radius)) - 1, 0)
+    y1 = min(int(np.ceil(y + radius)) + 2, ny)
+    if y1 <= y0:
+        return
+    yy = (np.arange(ny, dtype=float) - y)[y0:y1]
+    xx = np.arange(array.shape[1], dtype=float) - x
+    rows = array[y0:y1]
+    rows[np.hypot(xx[None, :], yy[:, None]) <= radius] = value
+
+
 def deadpix_fill(image, badmask, neighbors=3):
     """Iterative bad-pixel repair (bpixfix.pro): each pass replaces bad
     pixels having >= `neighbors` good 3x3 neighbors with the IDL-median of
@@ -1060,7 +1084,7 @@ def find_stars(image, n_stars=5, exclude_px=40.0, min_snr=10.0,
             first_peak = peak
         elif peak - sky < rel_floor * (first_peak - sky):
             break
-        masked[radius_map(masked.shape, ix, iy) <= exclude_px] = sky
+        blank_disc(masked, ix, iy, exclude_px, sky)
         x, y = cntrd(work, ix, iy, star_fwhm_px)
         if x < 0 or y < 0:
             continue

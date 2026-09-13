@@ -108,6 +108,13 @@ def test_field_solve_model_script():
 
 
 @pytest.mark.slow
+def test_parallel_model_script():
+    """parallel project: every optimization commit on the engine proves it
+    changes no number -- see parallel_model.py."""
+    _run(os.path.join(REGRESS, "parallel_model.py"))
+
+
+@pytest.mark.slow
 def test_fwhm_srtool_model_script():
     """The 4th FWHM convention must stay the SR tool's own process --
     see fwhm_srtool_model.py."""

@@ -40,7 +40,7 @@ import numpy as np
 
 from .constants import TEL_DIAMETER_M
 from .image_strehl import (
-    CROWDING_WARN_FRAC, aperture_flux, cntrd, find_peak, radius_map,
+    CROWDING_WARN_FRAC, aperture_flux, blank_disc, cntrd, find_peak,
     sigma_clipped_median,
 )
 from .nirc2 import (
@@ -909,7 +909,7 @@ def deep_star_catalog(image, params, sky=None, n_max=400,
             first_peak = peak
         elif peak - sky < rel_floor * (first_peak - sky):
             break
-        masked[radius_map(masked.shape, ix, iy) <= exclude_px] = sky
+        blank_disc(masked, ix, iy, exclude_px, sky)
         x, y = cntrd(work, ix, iy, fwhm)
         if x < 0 or y < 0:
             continue
