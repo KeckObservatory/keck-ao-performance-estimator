@@ -69,6 +69,14 @@ changes anything:
   and doing it per frame just to look at one star delayed every single-frame
   measurement for a correction that usually declined to run.
 
+**StarFinder evaluated, not adopted.** The INAF Python StarFinder package
+(v0.5.1) was evaluated 2026-09-12 as an alternative PSF source and as an
+alternative neighbour-subtraction fitter for the mitigation above. Neither
+produced a usable model on real NIRC2 fields, and neither improved on the
+shipped fitter where both did produce a model. The shipped PSF-fit
+neighbour-subtraction path above is unchanged by this evaluation; the
+detailed numbers live in the project's private ledger, not in this repo.
+
 See the bundled KAON 1556 GUI manual (`keck_ao_docs/`) for the full
 description.
 
