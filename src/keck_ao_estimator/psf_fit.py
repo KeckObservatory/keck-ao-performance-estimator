@@ -44,7 +44,7 @@ __all__ = [
     "PSF_FIT_POS_TOL_FWHM", "PSF_FIT_SIGMA_REJECT", "PSF_FIT_FOOTPRINT_FWHM",
     "PSF_FIT_MAX_SUBTRACTED_FRAC", "PSF_FIT_SR_VALIDATED_MAX",
     "PSF_FIT_SR_ENVELOPE_NOTE", "PSF_FIT_BIAS_SAFE_NOTE",
-    "PSF_FIT_BIAS_UNSAFE_NOTE",
+    "PSF_FIT_BIAS_UNSAFE_NOTE", "PSF_FIT_FIELD_BIAS_NOTE",
     "Neighbour", "CleanReport", "clean_star", "select_neighbours",
     "group_fit", "component_footprint",
 ]
@@ -175,6 +175,23 @@ PSF_FIT_SR_ENVELOPE_NOTE = (
     "0.30; above that its accuracy degrades (worst measured +0.07 at "
     "Strehl 0.80 for equal-brightness pairs inside 0.3\").")
 
+# The field engine (`field_solve`, engine="field") errs the OTHER way.
+# Measured on the fieldsolve FS-E2 battery (94 synthetic moderate-density
+# fields, truth SR 0.30): cleaned SR median +0.013 HIGH, +0.012 on the
+# targets both engines cleaned -- inside the validated +/-0.02, but in the
+# overestimate direction.  Source, measured against an isolated copy of
+# each target (30 of those fields): the aperture method itself contributes
+# ~0 (+0.0015), and the cleaning removes ~2 % of the star's OWN aperture
+# flux (median -2.3 %, 95 % [-5.8, +0.3]) while leaving the peak unchanged;
+# SR = peak/flux, so that is a small overestimate.  The per-target engine
+# over-subtracts by the same mechanism on those fields, ~11 %.
+PSF_FIT_FIELD_BIAS_NOTE = (
+    "Expected bias (field engine): a small OVERESTIMATE. On synthetic "
+    "crowded fields at Strehl 0.30 the field engine's cleaned SR ran a "
+    "median +0.013 HIGH -- within the validated +/-0.02, but high: the "
+    "cleaning removes about 2 % of the star's own aperture flux while the "
+    "peak is untouched. Treat this SR as a slight upper bound.")
+
 
 @dataclass(frozen=True)
 class Neighbour:
@@ -200,6 +217,17 @@ class CleanReport:
     Every field here is meant to be reportable.  A path that produced no
     change still returns a report with `cleaned=False` and a `note` that
     names the reason -- there is no outcome this feature does not log.
+
+    Both engines return this type; `engine` says which produced it.
+    "native" is `clean_star`'s per-target group fit, where every field
+    has the meaning given beside it.  "field" is `field_solve.field_clean`
+    against one solution of the whole frame: the subtraction, crowding,
+    residual and refusal fields mean the same thing (same formulas, same
+    gates, same wording), while the per-fit fields do not apply to a
+    shared solution and are reported as `n_fit_pixels=0`,
+    `n_rejected_pixels=0`, `n_dropped=0` and `fit_status=1` (0 on a
+    refusal).  `n_solution_stars` and `n_sweeps` describe that solution
+    and stay 0 for "native".
     """
     cleaned: bool
     note: str                   # human sentence, GUI-log ready

@@ -213,6 +213,81 @@ def side_effect_checks():
           n_diff == 0, f"{n_diff} of {len(fresh)} targets differ")
 
 
+def model_at_equality_checks():
+    """(e) `field_solve._model_at` is a line-for-line copy of
+    `EmpiricalPsf.at` that never touches the cache (FS-D13). A copy can
+    drift, so the two are compared bit-exact on a fresh ePSF at several
+    positions, including the unweighted model. `at()` returns whatever
+    position first requested a 1-arcsec bin, so its cache is cleared
+    before each request to make it compute at exactly that position."""
+    print("field_solve (e) -- _model_at == EmpiricalPsf.at, bit-exact:")
+    from keck_ao_estimator.field_solve import _model_at
+    params, flat = _calibration()
+    raw, _truth = synth.build_s2_donor_frame(params, 0.30)
+    work = _work(raw, flat)
+    ep_at = engine.build_epsf(work, params)
+    ep_mx = engine.build_epsf(work, params)
+    if not (ep_at.usable and ep_mx.usable):
+        check("field_solve (e): donor-frame ePSF usable", False, ep_at.note)
+        return
+    arrays = ("grid", "grad_y", "grad_x")
+    scalars = ("oversample", "r_stamp_px", "fwhm_px", "ee_photrad", "peak_value")
+    # two positions share a 1-arcsec bin on purpose
+    positions = (None, (512.0, 512.0), (512.4, 511.6), (101.3, 903.7),
+                 (871.25, 133.5))
+    mismatches = []
+    for pos in positions:
+        ep_at.__dict__.pop("_model_cache", None)
+        m_at = ep_at.at() if pos is None else ep_at.at(*pos)
+        m_mx = _model_at(ep_mx) if pos is None else _model_at(ep_mx, *pos)
+        same = (all(np.array_equal(getattr(m_at, a), getattr(m_mx, a)) for a in arrays)
+                and all(getattr(m_at, s) == getattr(m_mx, s) for s in scalars))
+        if not same:
+            mismatches.append(pos)
+    check("field_solve (e): _model_at equals EmpiricalPsf.at bit-exact at every "
+          "position (grid, gradients, scalars)",
+          not mismatches, f"{len(positions)} positions; mismatches {mismatches}")
+    check("field_solve (e): _model_at never writes the ePSF's cache",
+          not ep_mx.__dict__.get("_model_cache"),
+          f"{len(ep_mx.__dict__.get('_model_cache', {}))} cached models")
+
+
+def direction_note_checks():
+    """(f) psf_fit D27: every cleaned measurement names which way it is
+    likely wrong. The field engine's measured residual is POSITIVE (FS-E2:
+    median +0.013; source: ~2 % of the star's own aperture flux removed,
+    peak untouched), the opposite of the native engine's note, so a
+    field-engine result must carry the field note and a native result the
+    unchanged native note. Above PSF_FIT_SR_VALIDATED_MAX both engines
+    correctly carry the overestimate warning instead, so this check uses
+    the (b) geometry at sr 0.15, where a cleaned SR cannot reach 0.30 and
+    the note is decided by the engine alone."""
+    print("field_solve (f) -- direction note names the field engine's residual:")
+    params, flat = _calibration()
+    donor_raw, _dt = synth.build_s2_donor_frame(params, 0.15)
+    epsf = engine.build_epsf(_work(donor_raw, flat), params)
+    raw, truth = synth._s2_lattice_frame(params, 0.15, 0, (0.45,),
+                                         seed=synth.SEED)
+    work = _work(raw, flat)
+    cat = engine.deep_star_catalog(work, params)
+    tstar = truth["stars"][truth["pairs"][0]["target_id"]]
+    pos = (tstar["x"], tstar["y"])
+    kw = dict(params=params, pos=pos, psf_clean=True, epsf=epsf, star_catalog=cat)
+    rf = engine.measure_strehl(work, psf_clean_engine="field", **kw)
+    rn = engine.measure_strehl(work, **kw)
+    note = engine.PSF_FIT_FIELD_BIAS_NOTE
+    check("field_solve (f): field note names the +0.013 residual and its source",
+          "+0.013" in note and "OVERESTIMATE" in note and "2 %" in note
+          and "aperture flux" in note, repr(note[:80]))
+    check("field_solve (f): a cleaned field-engine result carries the field note",
+          rf.ok and rf.cleaned and rf.strehl <= engine.PSF_FIT_SR_VALIDATED_MAX
+          and rf.psf_clean_bias == note,
+          f"cleaned={rf.cleaned} SR {rf.strehl:.4f} bias note {rf.psf_clean_bias[:40]!r}")
+    check("field_solve (f): the native engine's note is unchanged",
+          rn.ok and rn.cleaned and rn.psf_clean_bias == engine.PSF_FIT_BIAS_SAFE_NOTE,
+          f"cleaned={rn.cleaned} bias note {rn.psf_clean_bias[:40]!r}")
+
+
 def _s5_sparse():
     """The S5-sparse frame with the sr 0.30 donor-frame ePSF. Its own ePSF
     is uncalibrated (too few usable donors), and solve_field correctly
@@ -294,7 +369,9 @@ def main():
     for name, fn in (("(a) no-op", noop_isolated_star_checks),
                       ("(b) S2 pair", s2_pair_checks),
                       ("(c) S5-sparse", s5_sparse_convergence_checks),
-                      ("(d) non-convergence", non_convergence_refusal_checks)):
+                      ("(d) non-convergence", non_convergence_refusal_checks),
+                      ("(e) _model_at == at", model_at_equality_checks),
+                      ("(f) direction note", direction_note_checks)):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")

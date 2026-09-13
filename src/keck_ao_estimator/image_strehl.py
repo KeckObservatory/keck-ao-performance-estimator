@@ -595,10 +595,13 @@ def _bias_note(strehl, rep):
         return ""
     from .psf_fit import (
         PSF_FIT_BIAS_SAFE_NOTE, PSF_FIT_BIAS_UNSAFE_NOTE,
-        PSF_FIT_SR_VALIDATED_MAX,
+        PSF_FIT_FIELD_BIAS_NOTE, PSF_FIT_SR_VALIDATED_MAX,
     )
     if strehl > PSF_FIT_SR_VALIDATED_MAX:
         return PSF_FIT_BIAS_UNSAFE_NOTE
+    if getattr(rep, "engine", "native") == "field":
+        # the field engine's measured residual is positive, not negative
+        return PSF_FIT_FIELD_BIAS_NOTE
     note = PSF_FIT_BIAS_SAFE_NOTE
     if getattr(rep, "epsf_tag", "") == "theoretical":
         note += (" Model is THEORETICAL (D26): it carries no static speckle "

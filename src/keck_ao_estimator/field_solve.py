@@ -68,7 +68,14 @@ FIELD_SOLVE_AMP_FLOOR_SIGMA = 5.0
 
 @dataclass(frozen=True)
 class SolvedStar:
-    """One catalogued star in a field solution."""
+    """One catalogued star in a field solution.
+
+    `x_cat`/`y_cat` are where the catalogue put it; every sweep fits from
+    there, so the solved `x`/`y` can move at most PSF_FIT_POS_TOL_FWHM from
+    them in total.  `amp` is 0.0 for a dropped star.  `model_key` is the
+    1-arcsec bin of its group's anchor, and the model itself is
+    `FieldSolution.models[group]` -- a star is always rendered with the
+    model it was fitted with."""
     x_cat: float                # catalogue position: the fit anchor
     y_cat: float
     x: float                    # solved position
@@ -88,7 +95,21 @@ class FieldSolution:
     """Every catalogued star of one frame, solved together.
 
     Frozen: `measure_field` shares one solution across all the stars it
-    measures, so nothing downstream may mutate it."""
+    measures, so nothing downstream may mutate it.
+
+    `converged` is True only when the last sweep moved no amplitude by more
+    than `tol` (relative, against a 5-sigma amplitude floor) AND no group
+    fit failed in that sweep; `field_clean` refuses every target on a
+    solution that is not.  `max_rel_change` and `n_failed_fits` hold one
+    entry per sweep run, so `n_sweeps == len(max_rel_change)`.  `n_groups`
+    counts fitted groups after splitting; `n_split_groups` counts the
+    connected components that exceeded FIELD_SOLVE_MAX_GROUP and were
+    split; `n_dropped` counts stars removed from the solution.  `models`
+    holds one EpsfModel per group, built outside the ePSF's own cache
+    (FS-D13), which is why rendering from a solution never changes a later
+    `clean_star` result.  A solution that could not be built (no usable
+    ePSF, empty catalogue) has `stars=()`, `n_sweeps=0` and the reason in
+    `note`.  `runtime_s` is wall time of the solve."""
     stars: tuple                # SolvedStar, catalogue order
     converged: bool
     n_sweeps: int
