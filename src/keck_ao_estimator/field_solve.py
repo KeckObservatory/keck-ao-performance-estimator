@@ -498,9 +498,14 @@ def field_clean(work, solution, pos, params, epsf, *, scope="frame",
             + (solution.note if solution is not None
                else "no field solution supplied") + ")",
             crowding_before=float(crowd0), crowding_after=float(crowd0))
-    _sky_g, sky_sigma = _robust_sky(work)
+    # the frame's robust sky scatter is only the fallback when the target's
+    # own annulus gives none; it is a full-frame sigma-clipped median, and
+    # computing it for every target anyway was 61 % of a field's per-target
+    # cost (parallel PR-D12) -- same value whenever it is used
     if sky_sigma0 > 0.0:
         sky_sigma = sky_sigma0
+    else:
+        _sky_g, sky_sigma = _robust_sky(work)
 
     # the one ePSF request `clean_star` itself makes for this target, so
     # the footprint scope selects with exactly the model arm A selects with

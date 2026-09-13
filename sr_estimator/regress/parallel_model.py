@@ -19,6 +19,11 @@ here that compares the new code path against the old one, bit for bit.
       `measure_field(workers=N)` repr-identical to `workers=1` on >= 20
       explicit targets (field engine) and on the capped find_stars path;
       --full adds the default path, the native engine and the auto path.
+  (d) PR-D12  `field_clean` computes the frame's robust sky only when the
+      target's annulus gives no scatter: every field-engine target (frame
+      scope through `measure_strehl`, footprint scope directly, OPEN-8's
+      near-singular SEED+34 targets included) identical to the pre-PR-D12
+      code patched back in as the reference.
 
 Default run is the CI-wired subset; --full adds frames. Needs no network
 and no proprietary data: the bundled example frame, the packaged K2
@@ -302,6 +307,97 @@ def workers_checks(full=False):
           f"notes {[r.psf_clean_note[40:70] for r in r_n]}")
 
 
+# ------------------------------------------ (d) PR-D12 frame sky scatter
+
+_D12_NEW = """\
+    if sky_sigma0 > 0.0:
+        sky_sigma = sky_sigma0
+    else:
+        _sky_g, sky_sigma = _robust_sky(work)
+"""
+_D12_OLD = """\
+    _sky_g, sky_sigma = _robust_sky(work)
+    if sky_sigma0 > 0.0:
+        sky_sigma = sky_sigma0
+"""
+
+
+class _PreD12:
+    """Patch `field_clean` back to the pre-PR-D12 code, verbatim: the frame's
+    robust sky computed for every target, then overwritten by the annulus
+    scatter whenever that is positive."""
+
+    def __enter__(self):
+        import inspect
+
+        import keck_ao_estimator.field_solve as fs_mod
+        src = inspect.getsource(fs_mod.field_clean)
+        if src.count(_D12_NEW) != 1:
+            raise RuntimeError("(d) PR-D12 block not found once in field_clean")
+        ns = {}
+        exec(compile(src.replace(_D12_NEW, _D12_OLD), fs_mod.__file__, "exec"),
+             fs_mod.__dict__, ns)
+        self._mod, self._saved = fs_mod, fs_mod.field_clean
+        fs_mod.field_clean = ns["field_clean"]
+        return self
+
+    def __exit__(self, *exc):
+        self._mod.field_clean = self._saved
+        return False
+
+
+def frame_sky_checks(full=False):
+    print("parallel (d) -- field_clean computes the frame's robust sky only when "
+          "it is used (PR-D12):")
+    import keck_ao_estimator.field_solve as fs_mod
+
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    dl = engine.nirc2_dl_psf(params.camname, params.pmsname, params.effwave_um,
+                             params.pmrangl_deg, npix=512, daytime=params.daytime,
+                             sfp=getattr(params, "sfp", False))
+    seeds = list(range(300, 306) if full else range(300, 302)) + [34]
+    n_targets, different, t_new, t_old = 0, [], 0.0, 0.0
+    for s in seeds:
+        raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + s, n_noise=1))[0]
+        red = engine.reduce_frame(raw, flat=flat)
+        work = engine.sigma_filter3(red)
+        cat = engine.deep_star_catalog(work, params)
+        ep = engine.build_epsf(work, params, catalog=cat)
+        sol = engine.solve_field(engine.sigma_filter3(np.asarray(red, dtype=float)),
+                                 params, ep, cat)
+        positions = [(c["x"], c["y"]) for c in cat]
+        if s == 34:     # OPEN-8's near-singular targets ride along
+            positions += [(truth["stars"][t]["x"], truth["stars"][t]["y"]) for t in (1, 6)]
+        for scope in ("frame", "footprint"):
+            kw = dict(psf_clean=True, robust_sky=True, epsf=ep, star_catalog=cat,
+                      psf_clean_engine="field", field_solution=sol)
+            t0 = time.perf_counter()
+            r_new = [engine.measure_strehl(red, params=params, pos=p, dl_psf=dl, **kw)
+                     for p in positions] if scope == "frame" else [
+                fs_mod.field_clean(work, sol, p, params, ep, scope="footprint",
+                                   catalog=cat, robust_sky=True) for p in positions]
+            t_new += time.perf_counter() - t0
+            with _PreD12():
+                t0 = time.perf_counter()
+                r_old = [engine.measure_strehl(red, params=params, pos=p, dl_psf=dl, **kw)
+                         for p in positions] if scope == "frame" else [
+                    fs_mod.field_clean(work, sol, p, params, ep, scope="footprint",
+                                       catalog=cat, robust_sky=True) for p in positions]
+                t_old += time.perf_counter() - t0
+            if scope == "footprint":    # (array, report): compare both, bit for bit
+                same = [np.array_equal(a[0], b[0]) and repr(a[1]) == repr(b[1])
+                        for a, b in zip(r_new, r_old)]
+            else:
+                same = [repr(a) == repr(b) for a, b in zip(r_new, r_old)]
+            n_targets += len(same)
+            different += [f"SEED+{s} {scope} t{i}" for i, ok in enumerate(same) if not ok]
+    check("(d) field engine: every target identical to the pre-PR-D12 field_clean "
+          "(measure_strehl frame scope; field_clean footprint scope, array and report)",
+          not different, f"{n_targets} comparisons over SEED+{seeds}; different "
+          f"{different[:3]}; {t_new:.1f} s vs {t_old:.1f} s pre-PR-D12")
+
+
 # ------------------------------------------------------------------- main
 
 def main():
@@ -311,7 +407,8 @@ def main():
     t_start = time.time()
     for name, fn in (("(a)", lambda: blank_disc_checks(args.full)),
                      ("(b)", lambda: cache_install_checks(args.full)),
-                     ("(c)", lambda: workers_checks(args.full))):
+                     ("(c)", lambda: workers_checks(args.full)),
+                     ("(d)", lambda: frame_sky_checks(args.full))):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")
