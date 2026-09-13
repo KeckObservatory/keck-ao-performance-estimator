@@ -221,7 +221,8 @@ def _groups(xs, ys, peaks, link_px, max_group):
 
 def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
                 tol=0.01, badmask=None, saturation=None,
-                sigma_reject=PSF_FIT_SIGMA_REJECT, install_models=True):
+                sigma_reject=PSF_FIT_SIGMA_REJECT, install_models=True,
+                workers=1):
     """Solve every catalogued star of `work` together.  -> FieldSolution.
 
     `work` is the SIGMA-FILTERED array `measure_strehl` measures on, and
@@ -229,6 +230,11 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
     omitted).  Never raises for a data condition: an unusable ePSF or an
     empty catalogue comes back as `converged=False` with the reason, so
     every consumer takes the same refusal path.
+
+    The group models it renders are installed in the ePSF's cache
+    (`install_models=False` opts out; parallel D.4).  `workers > 1` renders
+    them in the process's persistent pool (D.2); the sweeps stay serial
+    (Gauss-Seidel), and the solution is identical to `workers=1`.
     """
     from .epsf import _box, _robust_sky, deep_star_catalog
 
@@ -273,6 +279,13 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
     bin_px = 1000.0 / float(epsf.plate_scale_mas)
     keys, models, by_key = [], [], {}
     group_of = np.zeros(n, dtype=int)
+    if int(workers) > 1:
+        # parallel D.2: the distinct group models rendered in the process
+        # pool -- the same _model_at on the same inputs, so the loop below
+        # finds each one already present and the solution is unchanged
+        from .parallel import render_models
+        by_key = render_models(
+            epsf, [_bin_key(epsf, xc[m[0]], yc[m[0]]) for m in groups], workers)
     for g, members in enumerate(groups):
         key = _bin_key(epsf, xc[members[0]], yc[members[0]])
         if key not in by_key:

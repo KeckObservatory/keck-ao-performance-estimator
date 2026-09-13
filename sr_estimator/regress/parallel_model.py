@@ -14,6 +14,11 @@ here that compares the new code path against the old one, bit for bit.
       cache: exactly its keys, each bit-equal to a fresh `at()`, and every
       target's result (both engines) identical with and without the
       install (`install_models=False` on an identical ePSF build).
+  (c) D.2 / D.5  `workers > 1`: the render pool's models bit-equal to the
+      serial render, `solve_field(workers=N)` identical to `workers=1`, and
+      `measure_field(workers=N)` repr-identical to `workers=1` on >= 20
+      explicit targets (field engine) and on the capped find_stars path;
+      --full adds the default path, the native engine and the auto path.
 
 Default run is the CI-wired subset; --full adds frames. Needs no network
 and no proprietary data: the bundled example frame, the packaged K2
@@ -210,6 +215,71 @@ def cache_install_checks(full=False):
           f"{n_compared} comparisons; different {diffs[:5]}")
 
 
+# ------------------------------------------------- (c) D.2 / D.5 workers
+
+def workers_checks(full=False):
+    print("parallel (c) -- workers > 1 returns exactly what workers = 1 returns "
+          "(D.2 render pool, D.5 measure_field; T2 identity):")
+    import keck_ao_estimator.field_solve as fs_mod
+    import keck_ao_estimator.parallel as par
+
+    n = max(2, min(8, (os.cpu_count() or 2) // 2)) if full else 2
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    raw, _truth = list(synth.build_s5_moderate(params, seed=synth.SEED + 300, n_noise=1))[0]
+    red = engine.reduce_frame(raw, flat=flat)
+    work = engine.sigma_filter3(red)
+    cat = engine.deep_star_catalog(work, params)
+
+    # --- the render pool: the same models as the serial render
+    ep = engine.build_epsf(work, params)
+    keys = sorted({fs_mod._bin_key(ep, c["x"], c["y"]) for c in cat})
+    t0 = time.perf_counter()
+    m_1 = par.render_models(ep, keys, 1)
+    t_1 = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    m_n = par.render_models(ep, keys, n)
+    t_n = time.perf_counter() - t0
+    bad = [k for k in keys if not _models_equal(m_1[k], m_n[k])]
+    check(f"(c) render_models: {n} workers bit-equal to serial",
+          not bad, f"{len(keys)} models; different {bad[:3]}; {t_1:.2f} s serial, "
+          f"{t_n:.2f} s pool (incl. pool start if first)")
+
+    # --- solve_field
+    inner = engine.sigma_filter3(work)
+    ep1, epn = engine.build_epsf(work, params), engine.build_epsf(work, params)
+    s_1 = engine.solve_field(inner, params, ep1, cat, workers=1)
+    s_n = engine.solve_field(inner, params, epn, cat, workers=n)
+    same = (repr(s_1.stars) == repr(s_n.stars) and len(s_1.models) == len(s_n.models)
+            and all(_models_equal(a, b) for a, b in zip(s_1.models, s_n.models)))
+    check(f"(c) solve_field: {n} workers identical to serial (stars and models)",
+          same, f"{s_1.n_live} stars, {len({id(m) for m in s_1.models})} models")
+
+    # --- measure_field, >= 20 explicit targets and the capped/auto paths
+    positions = [(c["x"], c["y"]) for c in cat]
+    dl = engine.nirc2_dl_psf(params.camname, params.pmsname, params.effwave_um,
+                             params.pmrangl_deg, npix=512, daytime=params.daytime,
+                             sfp=getattr(params, "sfp", False))
+    cases = [("default path, explicit positions", dict(positions=positions)),
+             ("native psf_clean, explicit positions",
+              dict(positions=positions, psf_clean=True, robust_sky=True)),
+             ("field psf_clean, explicit positions",
+              dict(positions=positions, psf_clean=True, robust_sky=True,
+                   psf_clean_engine="field")),
+             ("native psf_clean, find_stars n_stars=6",
+              dict(n_stars=6, psf_clean=True, robust_sky=True)),
+             ("field psf_clean, auto n_stars=None",
+              dict(n_stars=None, psf_clean=True, robust_sky=True, psf_clean_engine="field"))]
+    if not full:
+        cases = [cases[2], cases[3]]
+    for label, kw in cases:
+        f_1 = engine.measure_field(red, params, dl_psf=dl, workers=1, **kw)
+        f_n = engine.measure_field(red, params, dl_psf=dl, workers=n, **kw)
+        check(f"(c) measure_field {label}: {n} workers repr-identical to serial",
+              [repr(r) for r in f_1] == [repr(r) for r in f_n],
+              f"{len(f_1)} results serial, {len(f_n)} with workers")
+
+
 # ------------------------------------------------------------------- main
 
 def main():
@@ -218,7 +288,8 @@ def main():
     args = ap.parse_args()
     t_start = time.time()
     for name, fn in (("(a)", lambda: blank_disc_checks(args.full)),
-                     ("(b)", lambda: cache_install_checks(args.full))):
+                     ("(b)", lambda: cache_install_checks(args.full)),
+                     ("(c)", lambda: workers_checks(args.full))):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")

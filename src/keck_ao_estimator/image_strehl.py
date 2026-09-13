@@ -1165,7 +1165,8 @@ def field_consistent(results, k=2.5, sr_floor=0.05, fwhm_floor_frac=0.10):
 
 def measure_field(image, params, positions=None, n_stars=5,
                   exclude_px=None, dl_psf=None, psf_clean=False, epsf=None,
-                  star_catalog=None, psf_clean_engine="native", **measure_kw):
+                  star_catalog=None, psf_clean_engine="native", workers=1,
+                  **measure_kw):
     """Measure several stars across one frame -> a measured field map.
 
     positions given -> measure each; else find_stars supplies candidates
@@ -1183,7 +1184,13 @@ def measure_field(image, params, positions=None, n_stars=5,
     `psf_clean=True` builds the field's empirical PSF and the deep
     neighbour catalogue ONCE and shares both across the stars, exactly as
     `dl_psf` is shared today: the ePSF is a property of the field, and
-    rebuilding it per star would be both slow and inconsistent."""
+    rebuilding it per star would be both slow and inconsistent.
+
+    `workers > 1` (parallel D.5) computes the same per-star
+    `measure_strehl` calls, and the field solution's group models, in the
+    process's persistent pool (`keck_ao_estimator.parallel`) and reads them
+    back in order, so the returned list is identical to `workers=1`, the
+    default."""
     photrad_as = measure_kw.get("photometry_radius_arcsec",
                                 NIRC2_PHOTOMETRY_RADIUS_ARCSEC)
     if exclude_px is None:
@@ -1218,7 +1225,7 @@ def measure_field(image, params, positions=None, n_stars=5,
             measure_kw = dict(
                 measure_kw, psf_clean_engine=psf_clean_engine,
                 field_solution=solve_field(_fwork, params, epsf,
-                                           star_catalog))
+                                           star_catalog, workers=workers))
     # matched apertures: strehlone below is computed with the SAME
     # photrad as the star, so an optimized radius stays self-consistent
     cap = None
@@ -1237,32 +1244,61 @@ def measure_field(image, params, positions=None, n_stars=5,
     out = []
     queue = list(positions)
     poor_run = 0
-    while queue:
-        if cap is not None and len(out) >= cap:
-            break
-        x, y = queue.pop(0)
-        r = measure_strehl(image, params=params, pos=(x, y),
-                           dl_psf=dl_psf, **measure_kw)
-        # a field map is only as honest as its points: failed centroids,
-        # SR outside (0, 1], saturated stars, and broken radial profiles
-        # (fwhm <= 0) are all rejected
-        good = (r.ok and not r.unphysical and not r.saturated
-                and r.fwhm_mas > 0.0)
-        if good and auto and r.sr_err > SR_ERR_MAX:
-            poor_run += 1
-            if poor_run >= 2:
-                break               # fainter candidates only get worse
-            good = False
-        elif good:
-            poor_run = 0
-        if good:
-            out.append(r)
-        if not queue or (cap is not None and len(out) >= cap):
-            # field self-consistency: drop statistical outliers, and let
-            # the loop backfill from remaining candidates if any
-            out, dropped = field_consistent(out)
-            if dropped and queue and cap is not None and len(out) < cap:
-                continue
+    # workers > 1 (parallel D.5): every measure_strehl below is the same call
+    # on the same inputs, computed ahead in the process pool and read back in
+    # queue order, so the decision loop is unchanged and its answer identical
+    batch = None
+    if workers > 1 and queue:
+        from .parallel import MeasureBatch, render_models
+        if (psf_clean and cap is None and epsf is not None
+                and getattr(epsf, "usable", False)
+                and epsf.__dict__.get("_fixed_model") is None):
+            # each target's own 1-arcsec model, rendered once in the pool and
+            # installed before the measurements start (PR-D9: a bin's model
+            # is one value whichever position asks)
+            from .field_solve import _bin_key
+            cache = epsf.__dict__.setdefault("_model_cache", {})
+            missing = [k for k in dict.fromkeys(_bin_key(epsf, x, y) for x, y in queue)
+                       if k not in cache]
+            for k, m in render_models(epsf, missing, workers).items():
+                cache.setdefault(k, m)
+        batch = MeasureBatch(image, params, dl_psf, measure_kw, queue, workers,
+                             ahead=None if cap is None else int(workers))
+    i_next = 0
+    try:
+        while queue:
+            if cap is not None and len(out) >= cap:
+                break
+            x, y = queue.pop(0)
+            if batch is None:
+                r = measure_strehl(image, params=params, pos=(x, y),
+                                   dl_psf=dl_psf, **measure_kw)
+            else:
+                r = batch.result(i_next)
+            i_next += 1
+            # a field map is only as honest as its points: failed centroids,
+            # SR outside (0, 1], saturated stars, and broken radial profiles
+            # (fwhm <= 0) are all rejected
+            good = (r.ok and not r.unphysical and not r.saturated
+                    and r.fwhm_mas > 0.0)
+            if good and auto and r.sr_err > SR_ERR_MAX:
+                poor_run += 1
+                if poor_run >= 2:
+                    break               # fainter candidates only get worse
+                good = False
+            elif good:
+                poor_run = 0
+            if good:
+                out.append(r)
+            if not queue or (cap is not None and len(out) >= cap):
+                # field self-consistency: drop statistical outliers, and let
+                # the loop backfill from remaining candidates if any
+                out, dropped = field_consistent(out)
+                if dropped and queue and cap is not None and len(out) < cap:
+                    continue
+    finally:
+        if batch is not None:
+            batch.close()
     return out
 
 
