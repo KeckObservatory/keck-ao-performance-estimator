@@ -279,6 +279,28 @@ def workers_checks(full=False):
               [repr(r) for r in f_1] == [repr(r) for r in f_n],
               f"{len(f_1)} results serial, {len(f_n)} with workers")
 
+    # --- the sensitive case (PR-D11): OPEN-8's near-singular SEED+34 targets,
+    # whose refusal note carries a cleaned SR that BLAS threading moves in
+    # its last digit; a worker that does not compute exactly as this process
+    # does shows up here, where the well-conditioned targets above did not
+    raw34, truth34 = list(synth.build_s5_moderate(params, seed=synth.SEED + 34))[0]
+    work34 = engine.sigma_filter3(engine.reduce_frame(raw34, flat=flat))
+    ep34 = engine.build_epsf(work34, params)
+    cat34 = engine.deep_star_catalog(work34, params)
+    pos34 = [(truth34["stars"][t]["x"], truth34["stars"][t]["y"]) for t in (1, 6)]
+    kw34 = dict(psf_clean=True, robust_sky=True, epsf=ep34, star_catalog=cat34)
+    r_1 = [engine.measure_strehl(work34, params=params, pos=p, dl_psf=dl, **kw34)
+           for p in pos34]
+    batch = par.MeasureBatch(work34, params, dl, kw34, pos34, n)
+    try:
+        r_n = [batch.result(i) for i in range(len(pos34))]
+    finally:
+        batch.close()
+    check(f"(c) OPEN-8's near-singular SEED+34 t1/t6: {n} pool results repr-identical "
+          "to this process's (PR-D11)",
+          [repr(r) for r in r_1] == [repr(r) for r in r_n],
+          f"notes {[r.psf_clean_note[40:70] for r in r_n]}")
+
 
 # ------------------------------------------------------------------- main
 

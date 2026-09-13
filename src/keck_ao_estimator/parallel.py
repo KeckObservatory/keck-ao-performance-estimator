@@ -5,9 +5,12 @@ design block D.2 / D.5, PR-D10).
   workers > 1, reused by every later call, recreated only when the worker
   count changes, shut down at interpreter exit (PR-D10: the pool is session
   infrastructure, so a caller making more than one call pays its start once).
-- Workers are spawned with OPENBLAS / OMP / MKL threads = 1: those variables
-  are set in this process's environment while the workers are created, and a
-  spawned process starts from that environment.
+- Workers inherit this process's environment unchanged, BLAS threading
+  included (parallel PR-D11): OpenBLAS's thread count changes some LAPACK /
+  BLAS results in their last bits -- measured, psf_fit_model.py's refused
+  OPEN-8 SEED+34 t1 prints a cleaned SR of 6.36 with the default and 6.33
+  with OPENBLAS_NUM_THREADS=1 -- so pinning workers to 1 thread would break
+  the bit-identity everything here is built on.
 - Large arrays reach the workers through ONE shared-memory block per call,
   never through per-task pickles: `Shared` pickles a call's state with every
   ndarray of at least SHARE_MIN_BYTES replaced by a reference into the block,
@@ -34,7 +37,6 @@ from multiprocessing import shared_memory
 import numpy as np
 
 SHARE_MIN_BYTES = 1 << 16
-_BLAS_ENV = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
 
 _LOCK = threading.Lock()
 _POOL = None
@@ -49,32 +51,24 @@ def _ping(delay):
 
 
 def get_pool(workers):
-    """This process's persistent pool of `workers` processes (PR-D10)."""
+    """This process's persistent pool of `workers` processes (PR-D10),
+    spawned with this process's environment unchanged (PR-D11)."""
     global _POOL, _POOL_WORKERS
     workers = int(workers)
     with _LOCK:
         if _POOL is not None and _POOL_WORKERS == workers:
             return _POOL
         _shutdown_locked()
-        saved = {k: os.environ.get(k) for k in _BLAS_ENV}
-        try:
-            for k in _BLAS_ENV:
-                os.environ[k] = "1"
-            pool = ProcessPoolExecutor(max_workers=workers,
-                                       mp_context=mp.get_context("spawn"))
-            # spawn every worker now, under the pinned environment: tasks that
-            # each hold a worker briefly force one process per task
-            seen = set()
-            for _attempt in range(3):
-                seen |= set(pool.map(_ping, [0.2] * workers))
-                if len(seen) >= workers:
-                    break
-        finally:
-            for k, v in saved.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
+        pool = ProcessPoolExecutor(max_workers=workers,
+                                   mp_context=mp.get_context("spawn"))
+        # start every worker now rather than on first use: tasks that each
+        # hold a worker briefly force one process per task, so the pool's
+        # start cost is paid here, once
+        seen = set()
+        for _attempt in range(3):
+            seen |= set(pool.map(_ping, [0.2] * workers))
+            if len(seen) >= workers:
+                break
         _POOL, _POOL_WORKERS = pool, workers
         return pool
 
@@ -191,16 +185,47 @@ def _attach(ref):
 
 # --------------------------------------------------------------- renders
 
-def _render_task(ref, key, bin_px):
+_MODEL_ARRAYS = ("grid", "grad_y", "grad_x")
+
+
+def _open_shm(name):
+    try:
+        return shared_memory.SharedMemory(name=name, track=False)
+    except TypeError:       # Python < 3.13: no `track`
+        return shared_memory.SharedMemory(name=name)
+
+
+def _render_task(ref, key, bin_px, out_name, slot, shape):
+    """Render one model.  Its three arrays are written into slot `slot` of
+    the parent's output block and the model comes back without them: 23 x
+    7.7 MB of arrays through the result pipe cost more than the renders
+    saved.  A model whose arrays are not float64 of `shape` comes back whole."""
+    import dataclasses
+
     from .field_solve import _model_at
-    epsf = _attach(ref)
-    return _model_at(epsf, key[0] * bin_px, key[1] * bin_px)
+    m = _model_at(_attach(ref), key[0] * bin_px, key[1] * bin_px)
+    arrays = [getattr(m, a) for a in _MODEL_ARRAYS]
+    if any(a.shape != tuple(shape) or a.dtype != np.float64 for a in arrays):
+        return m, False
+    step = int(np.prod(shape)) * 8
+    shm = _open_shm(out_name)
+    try:
+        for j, a in enumerate(arrays):
+            np.ndarray(shape, dtype=np.float64, buffer=shm.buf,
+                       offset=(slot * 3 + j) * step)[...] = a
+    finally:
+        shm.close()
+    empty = np.empty((0, 0))
+    return dataclasses.replace(m, **{a: empty for a in _MODEL_ARRAYS}), True
 
 
 def render_models(epsf, keys, workers):
     """{key: `_model_at(epsf, bin centre of key)`} for the distinct `keys`, in
     first-appearance order, rendered in the pool when `workers > 1` (D.2).
-    The same function on the same inputs as the serial render."""
+    The same function on the same inputs as the serial render; the arrays
+    return through shared memory and are copied out bit for bit."""
+    import dataclasses
+
     from .field_solve import _model_at
     keys = list(dict.fromkeys(keys))
     bin_px = 1000.0 / float(epsf.plate_scale_mas)
@@ -208,11 +233,32 @@ def render_models(epsf, keys, workers):
         return {k: _model_at(epsf, k[0] * bin_px, k[1] * bin_px) for k in keys}
     light = copy.copy(epsf)
     light.__dict__.pop("_model_cache", None)
-    with Shared(light) as sh:
-        pool = get_pool(workers)
-        ref = sh.ref()
-        futs = [pool.submit(_render_task, ref, k, bin_px) for k in keys]
-        return {k: f.result() for k, f in zip(keys, futs)}
+    grid_n = 2 * int(np.ceil(epsf.r_stamp_px)) * int(epsf.oversample) + 1
+    shape = (grid_n, grid_n)
+    step = grid_n * grid_n * 8
+    out = shared_memory.SharedMemory(create=True, size=len(keys) * 3 * step)
+    try:
+        with Shared(light) as sh:
+            pool = get_pool(workers)
+            ref = sh.ref()
+            futs = [pool.submit(_render_task, ref, k, bin_px, out.name, i, shape)
+                    for i, k in enumerate(keys)]
+            models = {}
+            for i, (k, f) in enumerate(zip(keys, futs)):
+                m, in_block = f.result()
+                if in_block:
+                    copied = {a: np.array(np.ndarray(shape, dtype=np.float64, buffer=out.buf,
+                                                      offset=(i * 3 + j) * step))
+                              for j, a in enumerate(_MODEL_ARRAYS)}
+                    m = dataclasses.replace(m, **copied)
+                models[k] = m
+            return models
+    finally:
+        out.close()
+        try:
+            out.unlink()
+        except FileNotFoundError:
+            pass
 
 
 # -------------------------------------------------------------- measure
