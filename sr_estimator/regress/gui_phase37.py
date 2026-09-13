@@ -133,11 +133,12 @@ def main():
     win.n2_nstars.setValue(6)
     win._on_nirc2_measure_field()
     assert isinstance(win._n2_field_solve_worker, FieldSolveWorker), \
-        "the once-per-frame solve must go through FieldSolveWorker " \
-        "(currently invoked via .run(), not .start() -- see the KNOWN " \
-        "LIMITATION comment in _nirc2_measure_field_setup / fieldsolve " \
-        "STATUS.md OPEN item)"
-    pump(lambda: win.n2_field_btn.isEnabled())
+        "the once-per-frame solve must go through FieldSolveWorker"
+    # wait for the SOLUTION and then the queue: the button alone is not a
+    # completion signal (parallel PR-P0-2)
+    pump(lambda: "[psf-clean:field] field solution:" in win.n2_log.toPlainText())
+    pump(lambda: win.n2_field_btn.isEnabled()
+         and not getattr(win, "_n2_field_queue", None))
     log = win.n2_log.toPlainText()
     assert "[psf-clean:field] field ePSF:" in log, log
     assert "[psf-clean:field] field solution:" in log, log
@@ -192,7 +193,9 @@ def main():
         win.n2_autofind.setChecked(True)
         win.n2_add_star.setChecked(False)
         win._on_nirc2_measure_field()
-        pump(lambda: win.n2_field_btn.isEnabled())
+        pump(lambda: win._n2_field_solve_worker.isFinished()
+             and win.n2_field_btn.isEnabled()
+             and not getattr(win, "_n2_field_queue", None))
     finally:
         fs.solve_field = real_solve_field
     log = win.n2_log.toPlainText()

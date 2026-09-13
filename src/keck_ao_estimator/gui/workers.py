@@ -5,13 +5,9 @@ guide-star lookup), ResolveWorker (the SIMBAD target-name lookup), and
 FieldSolveWorker (fieldsolve P3-2: the field engine's once-per-frame
 solve_field() call, ~3.6s/frame per FS-CP3b -- too slow to run on the GUI
 thread the way the ePSF build's blocking _nirc2_stage() calls do).
-**KNOWN LIMITATION (OPEN item, fieldsolve STATUS.md):** nirc2_strehl.py
-currently calls FieldSolveWorker.run() directly rather than .start() --
-started as a real QThread from inside the actual "Measure field" flow, it
-reproducibly hangs indefinitely (verified >90s; the identical call is
-fast and correct, ~2.5-3.3s, run standalone or synchronously with the
-exact same objects). The class itself is unchanged and correct; only its
-invocation is synchronous for now.
+nirc2_strehl.py starts it with .start() from the Measure-field flow and
+keeps that flow busy until its slot runs (parallel PR-P0-2; FS-OPEN-7 was a
+diagnostic that read a re-enabled button as a hang, not a threading fault).
 """
 import contextlib
 import io

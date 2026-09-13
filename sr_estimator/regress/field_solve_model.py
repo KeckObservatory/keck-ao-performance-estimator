@@ -283,7 +283,8 @@ def direction_note_checks():
           rf.ok and rf.cleaned and rf.strehl <= engine.PSF_FIT_SR_VALIDATED_MAX
           and rf.psf_clean_bias == note,
           f"cleaned={rf.cleaned} SR {rf.strehl:.4f} bias note {rf.psf_clean_bias[:40]!r}")
-    check("field_solve (f): the native engine's note is unchanged",
+    check("field_solve (f): the native engine carries PSF_FIT_BIAS_SAFE_NOTE, "
+          "not the field note",
           rn.ok and rn.cleaned and rn.psf_clean_bias == engine.PSF_FIT_BIAS_SAFE_NOTE,
           f"cleaned={rn.cleaned} bias note {rn.psf_clean_bias[:40]!r}")
 

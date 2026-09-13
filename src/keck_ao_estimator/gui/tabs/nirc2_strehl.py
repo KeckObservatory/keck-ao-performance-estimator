@@ -208,8 +208,10 @@ class Nirc2StrehlTabMixin:
             "(a neighbour INSIDE the aperture, not just in the sky "
             "annulus). Off = byte-faithful to the summit IDL tool. "
             "Validated to |SR bias| <= 0.02 for Strehl <= 0.30, where "
-            "the residual error is an UNDERESTIMATE; above 0.30 it "
-            "turns into an overestimate and the log says so explicitly "
+            "the residual error is a small UNDERESTIMATE on isolated "
+            "pairs but an OVERESTIMATE of order +0.04 for the native "
+            "engine on crowded fields (the field engine: about +0.013); "
+            "above 0.30 it turns into an overestimate and the log says so explicitly "
             "— cleaning still runs, just with lower confidence. Every "
             "cleaned measurement logs which way it is likely wrong. "
             "NOTE: on any star cleaning SUCCEEDS on, Robust sky "
@@ -1173,10 +1175,16 @@ class Nirc2StrehlTabMixin:
             self._nirc2_measure_field_setup(positions, n_req)
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
-            self._n2_field_busy = False
-            if not getattr(self, "_n2_field_queue", None):
-                self.n2_field_btn.setEnabled(True)
-                self.n2_field_btn.setText("Measure field")
+            # a field solve still running on its worker thread keeps the
+            # prologue busy (button disabled, re-entry refused) until its
+            # slot runs -- parallel PR-P0-2: releasing it here re-enabled
+            # "Measure field" mid-solve, which is what FS-OPEN-7's
+            # diagnostics mistook for a hang
+            if not getattr(self, "_n2_field_solving", False):
+                self._n2_field_busy = False
+                if not getattr(self, "_n2_field_queue", None):
+                    self.n2_field_btn.setEnabled(True)
+                    self.n2_field_btn.setText("Measure field")
 
     def _nirc2_stage(self, message):
         """Announce a blocking stage and force it to paint.
@@ -1238,29 +1246,10 @@ class Nirc2StrehlTabMixin:
                                         "for every star this field"))
             if ep.usable and self._nirc2_psf_clean_engine() == "field":
                 # fieldsolve P3-2 / FS-CP3b: solve_field costs ~3.6s/frame
-                # on top of the ePSF build above, so the intent (WORKORDER
-                # WP-3) is a WORKER THREAD, not another blocking
-                # _nirc2_stage() call. **KNOWN LIMITATION, run synchronously
-                # instead, for now (OPEN item, see fieldsolve STATUS.md):**
-                # FieldSolveWorker.start() -- a real QThread -- was built and
-                # verified correct AND FAST (~2.5-3.3s) in isolation, with
-                # the EXACT objects this call site captures, run either
-                # standalone or synchronously on this thread. Started via
-                # .start() from exactly HERE, in the real "Measure field"
-                # flow (after a Nirc2MeasureWorker frame load already ran
-                # and finished), it reproducibly HANGS indefinitely (verified
-                # to >90s, no exception, isRunning() stays True) -- a real
-                # Windows/Qt/scipy threading interaction I could not root-
-                # cause in this session (ruled out: BLAS thread-pool
-                # contention -- OMP/OPENBLAS/MKL_NUM_THREADS=1 makes no
-                # difference; the prior worker still running -- it is
-                # provably finished first). Rather than ship something that
-                # can freeze the GUI forever (far worse than a known
-                # multi-second block), this calls the SAME worker object's
-                # run() directly -- synchronous, GUI thread, identical log
-                # lines and control flow -- so flipping back to a real
-                # thread once the hang is understood is a one-line change
-                # (.run() -> .start()).
+                # on top of the ePSF build above, so it runs on a WORKER
+                # THREAD; the rest of the prologue continues from its slot.
+                # (FS-OPEN-7 was not a hang: parallel PR-P0-2 in
+                # keck_ao_experiments has the proof.)
                 self._nirc2_stage(
                     "building the field solution (one simultaneous solve "
                     f"of all {n_cat} stars)…")
@@ -1271,14 +1260,11 @@ class Nirc2StrehlTabMixin:
                     self._nirc2_field_solve_done)
                 self._n2_field_solve_worker.solution_failed.connect(
                     self._nirc2_field_solve_failed)
-                # .run(), NOT .start() -- see the KNOWN LIMITATION comment
-                # above. Signals emitted from run() on this same thread
-                # invoke the connected slots immediately (Qt's direct
-                # connection for a same-thread emit), so
-                # _nirc2_field_solve_done/_failed -> _nirc2_measure_field_
-                # continue() all run synchronously within this call, same
-                # as if .start()+the event loop had delivered them.
-                self._n2_field_solve_worker.run()
+                # the solution belongs to THIS frame; a frame loaded while
+                # it builds makes it stale (see _nirc2_field_solve_release)
+                self._n2_field_solve_image = self._n2_image
+                self._n2_field_solving = True
+                self._n2_field_solve_worker.start()
                 return
         self._nirc2_measure_field_continue()
 
@@ -1286,6 +1272,8 @@ class Nirc2StrehlTabMixin:
         """FieldSolveWorker finished (converged or not -- a refusal is
         reported per target later, via field_clean's own note, never
         silently here)."""
+        if not self._nirc2_field_solve_release():
+            return
         self._n2_field_solution = solution
         tag = self._nirc2_psf_clean_tag()
         self.n2_log.appendPlainText(
@@ -1302,12 +1290,30 @@ class Nirc2StrehlTabMixin:
         own contract). Logged and treated as no solution: every target
         this field falls back to clean_star's own on-the-fly build (same
         as a pick before this worker existed), not a silent skip."""
+        if not self._nirc2_field_solve_release():
+            return
         tag = self._nirc2_psf_clean_tag()
         self.n2_log.appendPlainText(
             f"  {tag} field solution build FAILED unexpectedly: {message} "
             "-- each target will build its own on the fly instead")
         self._n2_field_solution = None
         self._nirc2_measure_field_continue()
+
+    def _nirc2_field_solve_release(self):
+        """Called first by both field-solve slots: release the prologue the
+        worker was holding busy. Returns False, after saying so in the log,
+        when the frame changed while the solution was being built -- that
+        solution describes the OLD frame and must not clean the new one."""
+        self._n2_field_solving = False
+        self._n2_field_busy = False
+        if self._n2_image is not getattr(self, "_n2_field_solve_image", None):
+            self.n2_log.appendPlainText(
+                f"  {self._nirc2_psf_clean_tag()} field solution discarded "
+                "-- the frame changed while it was being built")
+            self.n2_field_btn.setEnabled(True)
+            self.n2_field_btn.setText("Measure field")
+            return False
+        return True
 
     def _nirc2_measure_field_continue(self):
         """The tail of the prologue -- unchanged from before P3-2 except
