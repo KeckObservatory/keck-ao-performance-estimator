@@ -1093,6 +1093,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                 "robust_sky": self.n2_robust_sky.isChecked(),
                 "auto_radius": self.n2_auto_rad.isChecked(),
                 "psf_clean": self.n2_psf_clean.isChecked(),
+                "psf_clean_engine": self.n2_psf_clean_engine.currentText(),
                 "stretch": self.n2_stretch.currentText(),
                 "white": self.n2_white.value(),
                 "nstars": self.n2_nstars.value(),
@@ -1252,6 +1253,8 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self.n2_robust_sky.setChecked(bool(n2.get("robust_sky", False)))
             self.n2_auto_rad.setChecked(bool(n2.get("auto_radius", False)))
             self.n2_psf_clean.setChecked(bool(n2.get("psf_clean", False)))
+            self.n2_psf_clean_engine.setCurrentText(n2.get(
+                "psf_clean_engine", engine.PSF_CLEAN_DEFAULT_ENGINE))
             self.n2_stretch.setCurrentText(n2.get("stretch", "IDL ±5σ"))
             self.n2_white.setValue(n2.get("white", 99.5))
             self.n2_nstars.setValue(int(n2.get("nstars", 5)))

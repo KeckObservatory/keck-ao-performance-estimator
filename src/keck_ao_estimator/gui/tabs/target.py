@@ -324,6 +324,19 @@ class TargetTabMixin:
                     if engine.same_star_name(t.get("name", ""), prev_name):
                         t["tt_offset_cfg"] = tt_offset.get_config()
                         break
+        # fieldsolve P3-2: the psf_clean engine choice (FS-D17) is
+        # per-target state too, threaded exactly like tt_offset_cfg above
+        # -- captured off whatever target we are switching AWAY from
+        # before its fields are overwritten below.
+        psf_clean_engine_widget = getattr(self, "n2_psf_clean_engine", None)
+        if psf_clean_engine_widget is not None:
+            prev_name = self.tname_edit.text().strip()
+            if prev_name:
+                for t in self._targets:
+                    if engine.same_star_name(t.get("name", ""), prev_name):
+                        t["psf_clean_engine_cfg"] = \
+                            psf_clean_engine_widget.currentText()
+                        break
         t = self._targets[idx]
         self.tname_edit.setText(t["name"])
         self.ra_edit.setText(t["ra"])
@@ -342,18 +355,28 @@ class TargetTabMixin:
         ngs_offset = getattr(self, "ngs_offset", None)
         if ngs_offset is not None:
             ngs_offset.set_config(dict(_ON_AXIS_OFFSET_CFG))
+        # defensive (getattr): same reason as tt_offset above -- the
+        # NIRC2 SR tool tab builds after this one too.
+        psf_clean_engine_widget = getattr(self, "n2_psf_clean_engine", None)
+        if psf_clean_engine_widget is not None:
+            psf_clean_engine_widget.setCurrentText(
+                t.get("psf_clean_engine_cfg")
+                or engine.PSF_CLEAN_DEFAULT_ENGINE)
         self._validate()
 
     def _add_target(self, name, ra, dec, pm_ra=0.0, pm_dec=0.0,
-                    tt_offset_cfg=None, tt_mag=None, select=True):
+                    tt_offset_cfg=None, tt_mag=None,
+                    psf_clean_engine_cfg=None, select=True):
         """Add or update a target (matched by name if named, else by
-        coords). tt_offset_cfg/tt_mag: this target's OWN guide star (see
-        _on_target_selected) -- None means "don't change it": a genuinely
-        NEW entry gets the on-axis default there, an EXISTING one keeps
-        whatever it already had. Only _save_current_target (captures the
-        LIVE tt_offset/tt_mag, like it already does for pm_ra/pm_dec) and
-        the starlist picker (real guide-star candidate data) pass one
-        explicitly. Returns its index."""
+        coords). tt_offset_cfg/tt_mag/psf_clean_engine_cfg: this target's
+        OWN guide star and PSF-fit engine choice (see _on_target_selected)
+        -- None means "don't change it": a genuinely NEW entry gets the
+        on-axis / FS-D17 default there, an EXISTING one keeps whatever it
+        already had. Only _save_current_target (captures the LIVE
+        tt_offset/tt_mag/engine choice, like it already does for
+        pm_ra/pm_dec) and the starlist picker (real guide-star candidate
+        data, tt_offset_cfg/tt_mag only) pass one explicitly. Returns its
+        index."""
         key = (name.strip().lower() if name.strip()
                else f"{ra}|{dec}".lower())
         idx = None
@@ -368,11 +391,14 @@ class TargetTabMixin:
             cfg = tt_offset_cfg if tt_offset_cfg is not None \
                 else prev.get("tt_offset_cfg")
             mag = tt_mag if tt_mag is not None else prev.get("tt_mag")
+            engine_cfg = (psf_clean_engine_cfg if psf_clean_engine_cfg is not None
+                         else prev.get("psf_clean_engine_cfg"))
         else:
-            cfg, mag = tt_offset_cfg, tt_mag
+            cfg, mag, engine_cfg = tt_offset_cfg, tt_mag, psf_clean_engine_cfg
         entry = {"name": name, "ra": ra, "dec": dec,
                 "pm_ra": pm_ra, "pm_dec": pm_dec,
-                "tt_offset_cfg": cfg, "tt_mag": mag}
+                "tt_offset_cfg": cfg, "tt_mag": mag,
+                "psf_clean_engine_cfg": engine_cfg}
         if idx is None:
             self._targets.append(entry)
             idx = len(self._targets) - 1
@@ -389,10 +415,15 @@ class TargetTabMixin:
             self.status.setText("Enter RA/Dec before saving a target.")
             return None
         name = self.tname_edit.text().strip()
-        idx = self._add_target(name, ra, dec,
-                               self.pmra_spin.value(), self.pmdec_spin.value(),
-                               tt_offset_cfg=self.tt_offset.get_config(),
-                               tt_mag=self.tt_mag.value(), select=True)
+        psf_clean_engine_widget = getattr(self, "n2_psf_clean_engine", None)
+        idx = self._add_target(
+            name, ra, dec, self.pmra_spin.value(), self.pmdec_spin.value(),
+            tt_offset_cfg=self.tt_offset.get_config(),
+            tt_mag=self.tt_mag.value(),
+            psf_clean_engine_cfg=(psf_clean_engine_widget.currentText()
+                                  if psf_clean_engine_widget is not None
+                                  else None),
+            select=True)
         # if a starlist is loaded, mirror the save into it (a session
         # addition, sidecar-persisted -- the real .lst file is never
         # touched); a no-op with no starlist loaded

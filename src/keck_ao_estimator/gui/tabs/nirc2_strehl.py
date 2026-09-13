@@ -30,7 +30,8 @@ import keck_ao_estimator as engine
 
 from ..theme import set_cue
 from ..widgets import SortableItem, _dspin, _shrinkable_label
-from ..workers import CatalogFetchWorker, NativeFilenameWorker, Nirc2MeasureWorker
+from ..workers import (CatalogFetchWorker, FieldSolveWorker,
+                       NativeFilenameWorker, Nirc2MeasureWorker)
 from .starlist_picker import _starlist_entry_mags
 
 # field-map annotation text over the new image background needs a halo to
@@ -227,6 +228,34 @@ class Nirc2StrehlTabMixin:
         form.addRow(self.n2_auto_rad)
         form.addRow(self.n2_ee_corr)
         form.addRow(self.n2_psf_clean)
+        self.n2_psf_clean_engine = QtWidgets.QComboBox()
+        self.n2_psf_clean_engine.addItems(["field", "native"])
+        self.n2_psf_clean_engine.setCurrentText(
+            engine.PSF_CLEAN_DEFAULT_ENGINE)  # FS-D17 (2026-09-13): field
+        self.n2_psf_clean_engine.setToolTip(
+            "Which engine solves the neighbours (fieldsolve FS-D17, "
+            "2026-09-13; both keep every psf_clean gate and refusal "
+            "wording above). "
+            "field (default): one simultaneous solution of every "
+            "catalogued star in the frame, then subtract all but the "
+            "target -- FS-E2 (94 built S5-moderate fields): own-set "
+            "signed median +0.014 (n 347) vs native's +0.043 (n 248), "
+            "matched-set reduction 78% vs 55%, runtime about 3.9x native "
+            "summed over a field (~3.6 s/frame for the solve on a typical "
+            "box, built once per frame here). "
+            "native: the original per-target group fit (<= 16 "
+            "neighbours within the target's own footprint). "
+            "Either way, a solution that fails to converge is a refusal, "
+            "never a silent fallback -- '[psf-clean:field] cleaning "
+            "refused: field solution did not converge ...'.")
+        self.n2_psf_clean_engine.setEnabled(self.n2_psf_clean.isChecked())
+        self.n2_psf_clean.toggled.connect(
+            self.n2_psf_clean_engine.setEnabled)
+        engine_row = QtWidgets.QHBoxLayout()
+        engine_row.addWidget(QtWidgets.QLabel("Engine:"))
+        engine_row.addWidget(self.n2_psf_clean_engine)
+        engine_row.addStretch(1)
+        form.addRow(self._wrap(engine_row))
         pick_row = QtWidgets.QHBoxLayout()
         pick_row.addWidget(self.n2_pick_sky)
         pick_row.addStretch(1)
@@ -766,9 +795,9 @@ class Nirc2StrehlTabMixin:
         # field) and by clicks made afterwards, which reuse that model.
         if self.n2_psf_clean.isChecked():
             self.n2_log.appendPlainText(
-                "  [psf-clean] skipped — PSF-fit cleaning applies to "
-                "'Measure field' (and to clicks after it), not to a "
-                "single-frame Measure")
+                f"  {self._nirc2_psf_clean_tag()} skipped — PSF-fit "
+                "cleaning applies to 'Measure field' (and to clicks "
+                "after it), not to a single-frame Measure")
         self._n2_worker = Nirc2MeasureWorker(
             path, "n", self.n2_im1.value(), self.n2_nim.value(),
             self.n2_bg1.value(), self.n2_nbg.value(), self._nirc2_radii(),
@@ -791,12 +820,14 @@ class Nirc2StrehlTabMixin:
             self._n2_field_dropped = []     # else stale × markers persist
             self._nirc2_clear_selection()   # else a stale ring can persist
             self._nirc2_set_ee_readout("")  # else a stale h can persist
-            # the ePSF and neighbour catalogue belong to ONE frame too, and
-            # single-star picks now reuse them (_nirc2_measure_at) -- so they
-            # must die with the frame or a click on the NEW frame would be
-            # cleaned against the OLD frame's model
+            # the ePSF, neighbour catalogue AND field solution belong to
+            # ONE frame too, and single-star picks now reuse them
+            # (_nirc2_measure_at) -- so they must die with the frame or a
+            # click on the NEW frame would be cleaned against the OLD
+            # frame's model (fieldsolve P3-2: field_solution added)
             self._n2_field_epsf = None
             self._n2_field_catalog = None
+            self._n2_field_solution = None
             self._nirc2_draw_map()
         self._n2_image = reduced
         self._n2_params = params
@@ -1028,45 +1059,73 @@ class Nirc2StrehlTabMixin:
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
             psf_clean=clean, epsf=self._n2_field_epsf if clean else None,
-            star_catalog=self._n2_field_catalog if clean else None)
+            star_catalog=self._n2_field_catalog if clean else None,
+            psf_clean_engine=self._nirc2_psf_clean_engine() if clean else "native",
+            field_solution=(getattr(self, "_n2_field_solution", None)
+                            if clean else None))
         if clean:
             self._nirc2_log_psf_clean(result)
         elif self.n2_psf_clean.isChecked():
             self.n2_log.appendPlainText(
-                "  [psf-clean] skipped — no field model for this frame; "
-                "run 'Measure field' first and later picks will reuse it")
+                f"  {self._nirc2_psf_clean_tag()} skipped — no field model "
+                "for this frame; run 'Measure field' first and later "
+                "picks will reuse it")
         self._nirc2_display(result)
         return result
 
+    def _nirc2_psf_clean_engine(self):
+        """The engine currently selected for PSF-fit cleaning ("field" or
+        "native", FS-D17) -- read directly from the combo box rather than
+        echoed back through the measurement result, so nothing here needs
+        an engine-side change to know which one ran."""
+        widget = getattr(self, "n2_psf_clean_engine", None)
+        return widget.currentText() if widget is not None else "native"
+
+    def _nirc2_psf_clean_tag(self):
+        """fieldsolve P3-2: `[psf-clean:field]` when the field engine is
+        selected, `[psf-clean]` for native -- unchanged. Both tags precede
+        the engine's own note VERBATIM (WP-3 handoff); only the tag
+        differs, never the wording."""
+        return ("[psf-clean:field]" if self._nirc2_psf_clean_engine() == "field"
+               else "[psf-clean]")
+
     def _nirc2_log_psf_clean(self, r):
-        """One [psf-clean] log line per measurement -- the engine's own
+        """One log line per measurement -- the engine's own
         `psf_clean_note` already reads correctly for both a real
-        subtraction ("[psf-clean] N neighbour(s) subtracted; X% of the
+        subtraction ("N neighbour(s) subtracted; X% of the
         aperture flux; residual Y%...") and every null/refusal outcome
         ("0 neighbours above the 0.1% contamination floor…", "cleaning
-        refused: annulus contamination got WORSE…") -- printed VERBATIM,
+        refused: annulus contamination got WORSE…", "cleaning refused:
+        field solution did not converge (...)") -- printed VERBATIM,
         never re-worded (WP-3 handoff), just normalized to always carry
-        exactly one leading "[psf-clean] " tag regardless of which of
-        those two forms the engine produced."""
+        exactly one leading tag regardless of which of those forms the
+        engine produced. The tag itself is `[psf-clean:field]` or
+        `[psf-clean]` depending on which engine actually ran this
+        measurement (FS-D17)."""
+        tag = self._nirc2_psf_clean_tag()
         note = r.psf_clean_note
-        if note.startswith("[psf-clean] "):
-            note = note[len("[psf-clean] "):]
-        self.n2_log.appendPlainText(f"  [psf-clean] {note}")
+        for prefix in ("[psf-clean:field] ", "[psf-clean] "):
+            if note.startswith(prefix):
+                note = note[len(prefix):]
+                break
+        self.n2_log.appendPlainText(f"  {tag} {note}")
         # D27: state which WAY the number is likely wrong, on every
         # measurement that was actually cleaned. The engine decides the
-        # wording (UNDERESTIMATE below the validated envelope, an explicit
-        # OVERESTIMATE warning above it); the GUI only has to not swallow
-        # it. A residual error the observer knows the sign of is usable --
-        # an unsigned one is not -- and erring low is only the "safe"
-        # direction if the observer is told that is what happened.
+        # wording (UNDERESTIMATE below the validated envelope for native,
+        # the field engine's own small-overestimate wording per P3-1, or
+        # an explicit OVERESTIMATE warning above the envelope for either);
+        # the GUI only has to not swallow it. A residual error the
+        # observer knows the sign of is usable -- an unsigned one is not
+        # -- and erring low is only the "safe" direction if the observer
+        # is told that is what happened.
         if r.psf_clean_bias:
-            self.n2_log.appendPlainText(f"  [psf-clean] {r.psf_clean_bias}")
+            self.n2_log.appendPlainText(f"  {tag} {r.psf_clean_bias}")
         # D25: warn (never refuse) when cleaning ran and landed above the
         # validated envelope -- the restriction is about confidence, not
         # correctness. Complements the bias line above: that one names the
         # direction, this one the magnitude and where it was measured.
         if r.cleaned and r.strehl > engine.PSF_FIT_SR_VALIDATED_MAX:
-            self.n2_log.appendPlainText(f"  [psf-clean] {engine.PSF_FIT_SR_ENVELOPE_NOTE}")
+            self.n2_log.appendPlainText(f"  {tag} {engine.PSF_FIT_SR_ENVELOPE_NOTE}")
 
     # ---- measured field map --------------------------------------------------
     def _on_nirc2_measure_field(self):
@@ -1144,6 +1203,9 @@ class Nirc2StrehlTabMixin:
         self._nirc2_draw_map()
         self._n2_field_epsf = None
         self._n2_field_catalog = None
+        self._n2_field_solution = None
+        self._n2_field_positions = positions
+        self._n2_field_n_req = n_req
         if self.n2_psf_clean.isChecked():
             # the ePSF and deep neighbour catalogue are properties of the
             # FIELD -- built ONCE here and shared across every tick, exactly
@@ -1167,14 +1229,92 @@ class Nirc2StrehlTabMixin:
             self._n2_field_epsf = engine.build_epsf(
                 work, self._n2_params, catalog=self._n2_field_catalog)
             ep = self._n2_field_epsf
+            tag = self._nirc2_psf_clean_tag()
             self.n2_log.appendPlainText(
-                f"  [psf-clean] field ePSF: tag={ep.tag!r} "
+                f"  {tag} field ePSF: tag={ep.tag!r} "
                 f"delta={ep.delta:.4f} converged={ep.converged} "
                 f"phase_coverage={ep.phase_coverage:.0%}"
                 + ("" if ep.usable else " -- cleaning will be skipped "
                                         "for every star this field"))
-        self._n2_field_queue = list(positions)
-        self._n2_field_target = n_req
+            if ep.usable and self._nirc2_psf_clean_engine() == "field":
+                # fieldsolve P3-2 / FS-CP3b: solve_field costs ~3.6s/frame
+                # on top of the ePSF build above, so the intent (WORKORDER
+                # WP-3) is a WORKER THREAD, not another blocking
+                # _nirc2_stage() call. **KNOWN LIMITATION, run synchronously
+                # instead, for now (OPEN item, see fieldsolve STATUS.md):**
+                # FieldSolveWorker.start() -- a real QThread -- was built and
+                # verified correct AND FAST (~2.5-3.3s) in isolation, with
+                # the EXACT objects this call site captures, run either
+                # standalone or synchronously on this thread. Started via
+                # .start() from exactly HERE, in the real "Measure field"
+                # flow (after a Nirc2MeasureWorker frame load already ran
+                # and finished), it reproducibly HANGS indefinitely (verified
+                # to >90s, no exception, isRunning() stays True) -- a real
+                # Windows/Qt/scipy threading interaction I could not root-
+                # cause in this session (ruled out: BLAS thread-pool
+                # contention -- OMP/OPENBLAS/MKL_NUM_THREADS=1 makes no
+                # difference; the prior worker still running -- it is
+                # provably finished first). Rather than ship something that
+                # can freeze the GUI forever (far worse than a known
+                # multi-second block), this calls the SAME worker object's
+                # run() directly -- synchronous, GUI thread, identical log
+                # lines and control flow -- so flipping back to a real
+                # thread once the hang is understood is a one-line change
+                # (.run() -> .start()).
+                self._nirc2_stage(
+                    "building the field solution (one simultaneous solve "
+                    f"of all {n_cat} stars)…")
+                self._n2_field_solve_worker = FieldSolveWorker(
+                    work, self._n2_params, ep, self._n2_field_catalog,
+                    parent=self)
+                self._n2_field_solve_worker.solution_done.connect(
+                    self._nirc2_field_solve_done)
+                self._n2_field_solve_worker.solution_failed.connect(
+                    self._nirc2_field_solve_failed)
+                # .run(), NOT .start() -- see the KNOWN LIMITATION comment
+                # above. Signals emitted from run() on this same thread
+                # invoke the connected slots immediately (Qt's direct
+                # connection for a same-thread emit), so
+                # _nirc2_field_solve_done/_failed -> _nirc2_measure_field_
+                # continue() all run synchronously within this call, same
+                # as if .start()+the event loop had delivered them.
+                self._n2_field_solve_worker.run()
+                return
+        self._nirc2_measure_field_continue()
+
+    def _nirc2_field_solve_done(self, solution):
+        """FieldSolveWorker finished (converged or not -- a refusal is
+        reported per target later, via field_clean's own note, never
+        silently here)."""
+        self._n2_field_solution = solution
+        tag = self._nirc2_psf_clean_tag()
+        self.n2_log.appendPlainText(
+            f"  {tag} field solution: {solution.n_live} star(s) solved, "
+            f"converged={solution.converged}, n_sweeps={solution.n_sweeps}, "
+            f"{solution.n_groups} group(s)"
+            + ("" if solution.converged
+               else f" -- {solution.note}"))
+        self._nirc2_measure_field_continue()
+
+    def _nirc2_field_solve_failed(self, message):
+        """The worker itself raised (a programming error, not a data
+        refusal -- solve_field never raises for a data condition per its
+        own contract). Logged and treated as no solution: every target
+        this field falls back to clean_star's own on-the-fly build (same
+        as a pick before this worker existed), not a silent skip."""
+        tag = self._nirc2_psf_clean_tag()
+        self.n2_log.appendPlainText(
+            f"  {tag} field solution build FAILED unexpectedly: {message} "
+            "-- each target will build its own on the fly instead")
+        self._n2_field_solution = None
+        self._nirc2_measure_field_continue()
+
+    def _nirc2_measure_field_continue(self):
+        """The tail of the prologue -- unchanged from before P3-2 except
+        that it may now run from the field-solve worker's slot instead of
+        directly after the ePSF build."""
+        self._n2_field_queue = list(self._n2_field_positions)
+        self._n2_field_target = self._n2_field_n_req
         self._n2_field_tried = 0
         self._n2_field_poor = 0
         self.n2_field_btn.setEnabled(False)
@@ -1249,7 +1389,9 @@ class Nirc2StrehlTabMixin:
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
             psf_clean=self.n2_psf_clean.isChecked(),
-            epsf=self._n2_field_epsf, star_catalog=self._n2_field_catalog)
+            epsf=self._n2_field_epsf, star_catalog=self._n2_field_catalog,
+            psf_clean_engine=self._nirc2_psf_clean_engine(),
+            field_solution=getattr(self, "_n2_field_solution", None))
         self._nirc2_flash_star(r, k)
         verdict = self._nirc2_field_accept(r)
         if verdict is None and self._n2_field_auto and r.sr_err > engine.SR_ERR_MAX:

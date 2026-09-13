@@ -1,7 +1,17 @@
 """Worker threads that run engine calls off the GUI thread: PrepareWorker
 (the expensive prepare_night fetch/parse step), SkyFetchWorker (the DSS/2MASS
 cutout download for the field-map backdrop), CatalogFetchWorker (the Vizier
-guide-star lookup), and ResolveWorker (the SIMBAD target-name lookup).
+guide-star lookup), ResolveWorker (the SIMBAD target-name lookup), and
+FieldSolveWorker (fieldsolve P3-2: the field engine's once-per-frame
+solve_field() call, ~3.6s/frame per FS-CP3b -- too slow to run on the GUI
+thread the way the ePSF build's blocking _nirc2_stage() calls do).
+**KNOWN LIMITATION (OPEN item, fieldsolve STATUS.md):** nirc2_strehl.py
+currently calls FieldSolveWorker.run() directly rather than .start() --
+started as a real QThread from inside the actual "Measure field" flow, it
+reproducibly hangs indefinitely (verified >90s; the identical call is
+fast and correct, ~2.5-3.3s, run standalone or synchronously with the
+exact same objects). The class itself is unchanged and correct; only its
+invocation is synchronous for now.
 """
 import contextlib
 import io
@@ -355,3 +365,42 @@ class Nirc2MeasureWorker(QThread):
             except Exception as e:
                 self.frame_failed.emit(no, f"{type(e).__name__}: {e}")
         self.finished_all.emit()
+
+
+class FieldSolveWorker(QThread):
+    """fieldsolve P3-2: builds one `FieldSolution` off the GUI thread.
+
+    `solve_field` costs about 3.6 s per frame on a typical box (FS-CP3b),
+    on top of the ePSF/catalogue build `_nirc2_measure_field_setup`
+    already does synchronously with `_nirc2_stage()` (a blocking call with
+    `processEvents()`, not a thread) -- adding that much more blocking
+    work to the same call would freeze "Measure field" for multiple
+    seconds. This follows the same QThread pattern as `Nirc2MeasureWorker`
+    (a plain worker with done/failed signals) rather than reusing that
+    class, since its `run()` loop is for the sequential single-star-per-
+    frame Run sequence, a different shape of work.
+
+    `solve_field` never raises for a DATA condition (an unusable ePSF, an
+    empty catalogue, a non-converging solve all come back as a normal
+    `FieldSolution` with `converged=False` and the reason in `.note`) --
+    `solution_failed` is therefore only a genuine programming error, and
+    `solution_done` covers every ordinary refusal too; the caller decides
+    what a non-converged solution means for logging and for whether any
+    target can be cleaned this field."""
+    solution_done = Signal(object)
+    solution_failed = Signal(str)
+
+    def __init__(self, work, params, epsf, catalog, parent=None):
+        super().__init__(parent)
+        self.work, self.params = work, params
+        self.epsf, self.catalog = epsf, catalog
+
+    def run(self):
+        from ..field_solve import solve_field
+        try:
+            solution = solve_field(
+                self.work, self.params, self.epsf, self.catalog)
+        except Exception as e:
+            self.solution_failed.emit(f"{type(e).__name__}: {e}")
+            return
+        self.solution_done.emit(solution)

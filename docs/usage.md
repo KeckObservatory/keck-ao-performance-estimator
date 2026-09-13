@@ -51,6 +51,34 @@ changes anything:
   Strehl 0.60 (worst case +0.04), and degrades further above that; the full
   table is in the private ledger.
 
+  **Engine: field (default) or native.** Two engines solve the
+  neighbours, an "Engine" selector next to the checkbox — **field**
+  (fieldsolve H2c, default since 2026-09-13, FS-D17) solves every
+  catalogued star in the frame together, one simultaneous fit, then
+  subtracts every solved component but the target; **native** is the
+  original per-target group fit described above (≤ 16 neighbours inside
+  the target's own footprint). Both keep every gate and refusal above —
+  a field solution that fails to converge is a refusal, logged
+  `[psf-clean:field] cleaning refused: field solution did not converge
+  (...)`, never a silent fallback, same as any other null outcome; native
+  outcomes keep the plain `[psf-clean]` tag. On a real S5-moderate
+  battery (94 built fields), field measured lower and flatter bias than
+  native: own-set signed median +0.0135 (n 347, 2 of 347 beyond ±0.30)
+  against native's +0.0428 (n 248, 16 beyond ±0.30); on the 236 targets
+  both cleaned, field's median is +0.0121 against native's +0.0417, a
+  74–78 % reduction of the robust-sky bias against native's 54–55 %. The
+  field engine's own S2 target-region cells (sep ≥ 0.3″ / contrast ≤ 3
+  mag, the same criterion as above): 21/21 met at Strehl 0.15, 24/24 at
+  0.30, 14/24 at 0.60 — native measures 20/20, 24/24 and 14/24 on the
+  same grid. The cost: about 3.9× native's total time over a field (the
+  simultaneous solve is the expensive part, ~3.6 s per frame on a typical
+  box, built once per frame and shared across every target in it, same
+  as the empirical PSF above). field's own residual still reads slightly
+  high (+0.01, D27's OVERESTIMATE direction, its own log wording says so
+  explicitly) rather than native's UNDERESTIMATE below Strehl 0.30 — read
+  whichever engine's direction note the log actually printed, not the
+  other engine's.
+
   **Developmental.** The empirical PSF needs at least 4 isolated, well-exposed
   donor stars, and on the real NIRC2 frames tested so far — sparse standard
   fields through the Galactic Centre — it has not found them. It then reports

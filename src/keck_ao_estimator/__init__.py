@@ -174,3 +174,13 @@ from .vignetting import (
     vignetting_fraction, vignetting_mag_penalty, vignetting_note,
 )
 from .winds import WindsError, night_winds, tau0_seconds
+
+# fieldsolve P3-2 (Sonnet, 2026-09-13): the GUI's and CLI's own default for
+# `psf_clean_engine=` (FS-D17, Eduardo 2026-09-13: "yes mae default" ->
+# field is now the default engine, native stays selectable). This is a
+# GUI/CLI-level policy choice, not an engine default -- `measure_strehl`'s
+# own `psf_clean_engine="native"` parameter default in image_strehl.py is
+# UNCHANGED (no engine file is edited for P3-2); the GUI and CLI simply
+# always pass this constant explicitly instead of relying on that default.
+# One constant so the GUI combo box and the CLI flag can never disagree.
+PSF_CLEAN_DEFAULT_ENGINE = "field"

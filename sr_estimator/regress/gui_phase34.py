@@ -111,6 +111,13 @@ def main():
     assert "0.30" in win.n2_psf_clean.toolTip()
     print("  [ok] checkbox present, default off")
 
+    # fieldsolve P3-2 (FS-D17): the engine selector's own default changed
+    # to "field" -- this file is specifically about the NATIVE engine's
+    # behaviour (gui_phase37.py covers the field engine and the selector
+    # itself), so it pins its choice explicitly rather than relying on
+    # whatever the default happens to be.
+    win.n2_psf_clean_engine.setCurrentText("native")
+
     # ---- config round-trip --------------------------------------------------
     c = win._collect_config()
     assert c["nirc2"]["psf_clean"] is False
