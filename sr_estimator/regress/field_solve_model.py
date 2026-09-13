@@ -178,10 +178,12 @@ def side_effect_checks():
     so a solve that asked for its own positions changed later clean_star
     results (caught by the FS-E1 driver's cross-tree identity check: 2 of 7
     targets on this frame, up to 2.3e-3 SR). Since PR-D9 every bin's model
-    is weighted at the bin centre, so the guarantee holds by construction;
-    the check stays, together with the cache-untouched assertion (the solve
-    still never writes `at()`'s cache). A moderate-density frame, not a
-    registered FS-E1 seed; its own ePSF."""
+    is weighted at the bin centre, so the guarantee holds by construction,
+    and since parallel D.4 the solve installs the models it renders in the
+    ePSF's cache: the assertions are that the cache holds exactly the
+    solve's keys, each bit-equal to `at()`, and that the shipped
+    measurement after the solve is still identical to one without. A
+    moderate-density frame, not a registered FS-E1 seed; its own ePSF."""
     params, flat = _calibration()
     raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + 200))[0]
     work = _work(raw, flat)
@@ -205,10 +207,23 @@ def side_effect_checks():
     fresh = native(ep_fresh)
     ep = engine.build_epsf(work, params)
     keys0 = set(ep.__dict__.get("_model_cache", {}).keys())
-    engine.solve_field(engine.sigma_filter3(work), params, ep, cat)
-    keys1 = set(ep.__dict__.get("_model_cache", {}).keys())
-    check("field_solve (c'): solve_field leaves the ePSF's model cache untouched",
-          keys0 == keys1, f"{len(keys0)} -> {len(keys1)} cached models")
+    sol = engine.solve_field(engine.sigma_filter3(work), params, ep, cat)
+    cache = ep.__dict__.get("_model_cache", {})
+    solve_keys = {s.model_key for s in sol.stars}
+    ep_check = engine.build_epsf(work, params)
+    bin_px = 1000.0 / float(ep_check.plate_scale_mas)
+    unequal = []
+    for k in sorted(solve_keys):
+        ep_check.__dict__.pop("_model_cache", None)
+        m, c = ep_check.at(k[0] * bin_px, k[1] * bin_px), cache.get(k)
+        if c is None or not all(np.array_equal(getattr(c, a), getattr(m, a))
+                                for a in ("grid", "grad_y", "grad_x")):
+            unequal.append(k)
+    check("field_solve (c'): solve_field installs exactly its models in the "
+          "ePSF's cache, each bit-equal to at() (parallel D.4)",
+          set(cache) == keys0 | solve_keys and not unequal,
+          f"{len(keys0)} -> {len(cache)} cached models; {len(solve_keys)} solve "
+          f"keys; unequal {unequal[:3]}")
     after = native(ep)
     n_diff = sum(1 for a, b in zip(fresh, after) if a != b)
     check("field_solve (c'): the shipped measurement after a field solve is "

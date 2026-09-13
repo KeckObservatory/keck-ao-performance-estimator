@@ -145,8 +145,10 @@ def _model_at(epsf, x=None, y=None):
     bin, same bin-centre weights, same `_assemble`, same `_make_model`), just
     never stored in the cache; regress (e) asserts the two stay bit-equal.
     FS-D13's reason for keeping it out of the cache (before PR-D9 a solve
-    moved later shipped measurements by up to 2.3e-3 SR) no longer applies;
-    installing the solve's models is a separate, identity-checked change."""
+    moved later shipped measurements by up to 2.3e-3 SR) no longer applies:
+    `solve_field` installs the models it renders (parallel D.4, identity
+    asserted in parallel_model.py (b)); this function itself still never
+    touches the cache."""
     from .epsf import _assemble, _make_model
     fixed = epsf.__dict__.get("_fixed_model")
     if fixed is not None:
@@ -219,7 +221,7 @@ def _groups(xs, ys, peaks, link_px, max_group):
 
 def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
                 tol=0.01, badmask=None, saturation=None,
-                sigma_reject=PSF_FIT_SIGMA_REJECT):
+                sigma_reject=PSF_FIT_SIGMA_REJECT, install_models=True):
     """Solve every catalogued star of `work` together.  -> FieldSolution.
 
     `work` is the SIGMA-FILTERED array `measure_strehl` measures on, and
@@ -266,8 +268,8 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
 
     groups, n_split = _groups(xc, yc, pk, 2.0 * r_comp, FIELD_SOLVE_MAX_GROUP)
     # one model per group, for the anchor's 1-arcsec bin, weighted at the
-    # bin centre so the answer does not depend on catalogue order; built
-    # here and kept in the solution, never in the ePSF's cache (FS-D13)
+    # bin centre so the answer does not depend on catalogue order; kept in
+    # the solution
     bin_px = 1000.0 / float(epsf.plate_scale_mas)
     keys, models, by_key = [], [], {}
     group_of = np.zeros(n, dtype=int)
@@ -279,6 +281,16 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
         models.append(by_key[key])
         for k in members:
             group_of[k] = g
+    # ... and installed in the ePSF's cache (parallel D.4).  Since PR-D9 a
+    # bin's model is one value whichever position asks, so a later target in
+    # one of these bins gets exactly the model at() would render, without
+    # rendering it again (FS-D13 kept the solve out of the cache only because,
+    # before PR-D9, the first request fixed a bin's weights).  setdefault: an
+    # entry already present is that same model, bit for bit.
+    if install_models and epsf.__dict__.get("_fixed_model") is None:
+        cache = epsf.__dict__.setdefault("_model_cache", {})
+        for key, model in by_key.items():
+            cache.setdefault(key, model)
 
     # saturation is an absolute detector level: judged on the RAW work
     # array, exactly as clean_star judges its neighbours, and handed to the

@@ -10,6 +10,10 @@ here that compares the new code path against the old one, bit for bit.
       `radius_map`: the mask itself on random draws, and
       `deep_star_catalog` / `find_stars` on real and synthetic frames,
       against the pre-D.3 code patched back in as the reference.
+  (b) D.4  `solve_field` installs the models it renders in the ePSF's
+      cache: exactly its keys, each bit-equal to a fresh `at()`, and every
+      target's result (both engines) identical with and without the
+      install (`install_models=False` on an identical ePSF build).
 
 Default run is the CI-wired subset; --full adds frames. Needs no network
 and no proprietary data: the bundled example frame, the packaged K2
@@ -144,6 +148,68 @@ def blank_disc_checks(full=False):
           not mism, f"{n_frames} frames; different: {mism}")
 
 
+# ---------------------------------------------------- (b) D.4 cache install
+
+def _models_equal(m1, m2):
+    return (all(np.array_equal(getattr(m1, a), getattr(m2, a))
+                for a in ("grid", "grad_y", "grad_x"))
+            and all(getattr(m1, s) == getattr(m2, s)
+                    for s in ("oversample", "r_stamp_px", "fwhm_px", "ee_photrad",
+                              "peak_value")))
+
+
+def cache_install_checks(full=False):
+    print("parallel (b) -- the solve's models installed in the ePSF cache change "
+          "no result (D.4):")
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    n_fields = n_compared = 0
+    key_bad, stars_bad, diffs = [], [], []
+    for s in (range(300, 324) if full else range(300, 304)):
+        raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + s, n_noise=1))[0]
+        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+        ep_a = engine.build_epsf(work, params)
+        if not ep_a.usable:
+            continue
+        n_fields += 1
+        ep_b = engine.build_epsf(work, params)      # the same build, never installed into
+        cat = engine.deep_star_catalog(work, params)
+        inner = engine.sigma_filter3(work)
+        sol_a = engine.solve_field(inner, params, ep_a, cat)
+        sol_b = engine.solve_field(inner, params, ep_b, cat, install_models=False)
+        if repr(sol_a.stars) != repr(sol_b.stars):
+            stars_bad.append(s)
+        cache = ep_a.__dict__.get("_model_cache", {})
+        fresh = engine.build_epsf(work, params)
+        bin_px = 1000.0 / float(fresh.plate_scale_mas)
+        for k in sorted({st.model_key for st in sol_a.stars}):
+            fresh.__dict__.pop("_model_cache", None)
+            if k not in cache or not _models_equal(cache[k], fresh.at(k[0] * bin_px,
+                                                                      k[1] * bin_px)):
+                key_bad.append((s, k))
+        if ep_b.__dict__.get("_model_cache"):
+            key_bad.append((s, "install_models=False wrote the cache"))
+        for tid in truth["target_ids"]:
+            st = truth["stars"][tid]
+            base = dict(params=params, pos=(st["x"], st["y"]), psf_clean=True,
+                        robust_sky=True, star_catalog=cat)
+            for eng in ("native", "field"):
+                ka = {} if eng == "native" else dict(psf_clean_engine="field", field_solution=sol_a)
+                kb = {} if eng == "native" else dict(psf_clean_engine="field", field_solution=sol_b)
+                ra = engine.measure_strehl(work, epsf=ep_a, **base, **ka)
+                rb = engine.measure_strehl(work, epsf=ep_b, **base, **kb)
+                n_compared += 1
+                if repr(ra) != repr(rb):
+                    diffs.append((s, tid, eng))
+    check("(b) solve_field installs exactly its models, each bit-equal to a fresh at()",
+          not key_bad, f"{n_fields} built fields; problems {key_bad[:3]}")
+    check("(b) the solution itself is identical with and without the install",
+          not stars_bad, f"different on {stars_bad}")
+    check("(b) every target, both engines: result repr-identical with and without "
+          "the installed models", not diffs,
+          f"{n_compared} comparisons; different {diffs[:5]}")
+
+
 # ------------------------------------------------------------------- main
 
 def main():
@@ -151,7 +217,8 @@ def main():
     ap.add_argument("--full", action="store_true", help="more frames and draws")
     args = ap.parse_args()
     t_start = time.time()
-    for name, fn in (("(a)", lambda: blank_disc_checks(args.full)),):
+    for name, fn in (("(a)", lambda: blank_disc_checks(args.full)),
+                     ("(b)", lambda: cache_install_checks(args.full))):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")
