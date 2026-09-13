@@ -75,9 +75,11 @@ changes anything:
   box, built once per frame and shared across every target in it, same
   as the empirical PSF above). field's own residual still reads slightly
   high (+0.01, D27's OVERESTIMATE direction, its own log wording says so
-  explicitly) rather than native's UNDERESTIMATE below Strehl 0.30 — read
-  whichever engine's direction note the log actually printed, not the
-  other engine's.
+  explicitly). native's note names two regimes below Strehl 0.30: a small
+  UNDERESTIMATE on isolated pairs, and an OVERESTIMATE of order +0.04 on
+  crowded fields with 3 or more subtracted neighbours (+0.043 on the same
+  battery, from over-subtracted aperture flux). Read whichever engine's
+  direction note the log actually printed, not the other engine's.
 
   **Developmental.** The empirical PSF needs at least 4 isolated, well-exposed
   donor stars, and on the real NIRC2 frames tested so far — sparse standard

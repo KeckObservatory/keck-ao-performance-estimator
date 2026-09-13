@@ -152,8 +152,15 @@ PSF_FIT_MIN_CLEAN_FLUX_FRAC = 0.206
 #   overestimate, and the direction that misleads.
 #
 # Measured, and NOT uniform:
-#   * At SR <= 0.30 the model under-predicts aperture flux by ~1.5 %, so it
-#     under-subtracts and the residual error is an UNDERESTIMATE. Safe.
+#   * On isolated pairs at SR <= 0.30 the model under-predicts aperture flux
+#     by ~1.5 %, so it under-subtracts and the residual error is an
+#     UNDERESTIMATE. Safe.
+#   * On crowded fields the same engine OVER-subtracts (fieldsolve
+#     FS-OPEN-6). FS-E2, 94 synthetic moderate-density fields at truth SR
+#     0.30: cleaned SR median +0.043 HIGH, +0.077 at 3-4 subtracted
+#     neighbours; against an isolated copy of each target the cleaning
+#     removes 11.5 % of the star's own aperture flux with the peak
+#     unchanged. The note names both regimes.
 #   * Above SR 0.30 the measured S2 bias is POSITIVE, +0.03 at sr=0.60 and
 #     up to +0.07 at sr=0.80 -- an OVERESTIMATE, the unsafe direction. That
 #     is why the envelope warning has to name the direction and not merely
@@ -162,9 +169,11 @@ PSF_FIT_MIN_CLEAN_FLUX_FRAC = 0.206
 #     structure, so it models less of the star than reality and
 #     under-subtracts. Underestimate. Safe.
 PSF_FIT_BIAS_SAFE_NOTE = (
-    "Expected bias: UNDERESTIMATE (any un-subtracted neighbour light "
-    "inflates the flux, which lowers peak/flux). Erring low is the "
-    "intended direction.")
+    "Expected bias: isolated pairs, a small UNDERESTIMATE (psf_fit D27, "
+    "~1.5 % under-predicted aperture flux); crowded fields with 3 or more "
+    "subtracted neighbours, an OVERESTIMATE of order +0.04 from "
+    "over-subtracted aperture flux (FS-E2 arm A +0.043; 11.5 % flux); the "
+    "field engine reduces this to about +0.013.")
 PSF_FIT_BIAS_UNSAFE_NOTE = (
     "WARNING -- expected bias: OVERESTIMATE. Above Strehl "
     f"{PSF_FIT_SR_VALIDATED_MAX:.2f} the measured bias is POSITIVE "

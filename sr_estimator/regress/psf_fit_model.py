@@ -781,6 +781,50 @@ def open8_checks():
               f"SR {getattr(r, 'strehl', float('nan')):.6f} vs {r0.strehl:.6f}")
 
 
+# ------------------------------------------------------- FS-OPEN-6 note
+
+NATIVE_NOTE = (
+    "Expected bias: isolated pairs, a small UNDERESTIMATE (psf_fit D27, "
+    "~1.5 % under-predicted aperture flux); crowded fields with 3 or more "
+    "subtracted neighbours, an OVERESTIMATE of order +0.04 from "
+    "over-subtracted aperture flux (FS-E2 arm A +0.043; 11.5 % flux); the "
+    "field engine reduces this to about +0.013.")
+
+
+def native_note_checks():
+    """FS-OPEN-6: the native engine's direction note names both regimes.
+
+    The note used to say only UNDERESTIMATE, which holds on isolated pairs
+    (D27) but not on crowded fields, where fieldsolve FS-E2 measured the
+    native engine at +0.043. The target is FS-E2's SEED+360 target 0: the
+    first target of its frame (so no earlier request fills the ePSF cache),
+    cleaned by the native engine with 3 neighbours subtracted, SR 0.2980 in
+    FS-E2's arm A, inside the validated envelope. The wording is Eduardo's,
+    fixed verbatim."""
+    print("FS-OPEN-6 -- native direction note names the crowded-field overestimate:")
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + 360))[0]
+    work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+    ep = engine.build_epsf(work, params)
+    if not ep.usable:
+        check("FS-OPEN-6 SEED+360: field ePSF usable", False, ep.note)
+        return
+    cat = engine.deep_star_catalog(work, params)
+    s = truth["stars"][0]
+    r = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
+                              psf_clean=True, robust_sky=True, epsf=ep,
+                              star_catalog=cat)
+    check("FS-OPEN-6 SEED+360 t0: native-cleaned with >= 3 neighbours, "
+          "inside the validated envelope",
+          r.ok and r.cleaned and r.n_subtracted >= 3
+          and r.strehl <= engine.PSF_FIT_SR_VALIDATED_MAX,
+          f"cleaned={r.cleaned} n_subtracted={r.n_subtracted} SR {r.strehl:.4f}")
+    check("FS-OPEN-6 SEED+360 t0: the note carries the verbatim wording",
+          r.psf_clean_bias == NATIVE_NOTE == engine.PSF_FIT_BIAS_SAFE_NOTE,
+          f"note {r.psf_clean_bias[:70]!r}")
+
+
 # ------------------------------------------------------------------- main
 
 def main():
@@ -792,7 +836,8 @@ def main():
     t_start = time.time()
     for name, fn in (("S1", s1_checks), ("S4", lambda: s4_checks(args.full)),
                      ("S5", lambda: s5_checks(args.full)),
-                     ("S6", s6_checks), ("OPEN-8", open8_checks)):
+                     ("S6", s6_checks), ("OPEN-8", open8_checks),
+                     ("FS-OPEN-6", native_note_checks)):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")
