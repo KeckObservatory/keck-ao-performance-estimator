@@ -139,32 +139,41 @@ measured number. On it you can:
 
 ## Parallelism
 
-`measure_field()` can spread its per-target measurements (and the S5
-battery's per-seed runs) across multiple worker **processes**. On the SR
-tool's NIRC2 tab, a **Workers** spin box next to the engine selector shows
-what this actually resolves to — not the literal `None` the GUI passes:
-the default is `$KECK_AO_WORKERS` if that environment variable is set,
-otherwise `min(8, cpu_count() // 2)`, capped at 8 here regardless (that cap
-is a GUI-only ceiling; `KECK_AO_WORKERS_UNCAPPED` is an environment-only
-override for offline batteries, not exposed in the GUI). Setting it to 1
-runs serially, in-process, with no worker pool at all — bit-identical to
-every result produced before this feature existed. The choice round-trips
-through the usual config save/load.
+`measure_field()` can spread its per-target measurements, and the field
+engine's group-ePSF renders (`solve_field`), across multiple worker
+**processes**. On the SR tool's NIRC2 tab, a **Workers** spin box next to
+the engine selector shows what this actually resolves to — not the literal
+`None` the GUI passes: the default is `$KECK_AO_WORKERS` if that
+environment variable is set, otherwise `min(8, cpu_count() // 2)`. The
+engine itself enforces a cap of 8 workers for every caller, GUI or
+otherwise (`KECK_AO_WORKERS_UNCAPPED=1` is the deliberate, environment-only
+override for offline batteries) — the spin box simply stops at the same
+cap, it is not a separate GUI-only ceiling. Setting it to 1 runs serially,
+in-process, with no worker pool at all — bit-identical to every result
+produced before this feature existed. The choice round-trips through the
+usual config save/load.
 
 **What this release parallelizes:** per-target `measure_strehl` calls in
-the "Measure field" flow, and per-seed runs in the S5 battery. Both are
-embarrassingly parallel and order-independent (see the note on
-`EmpiricalPsf.at()` below).
+the "Measure field" flow; the field engine's group-ePSF renders inside
+`solve_field` (the single largest parallel saving in the engine); and,
+for developers, `--workers` in `psf_fit_model.py` and the FS-E2 battery
+driver's native stage. All are embarrassingly parallel and
+order-independent (see the note on `EmpiricalPsf.at()` below).
 
 **What it does NOT parallelize:** `build_epsf` and the field engine's own
-Gauss-Seidel simultaneous-solve sweeps run serially regardless of the
-worker count. Both are memory-bandwidth-bound single computations, not a
-set of independent per-target jobs, and roughly 41% of a warm, psf_clean
-field-engine call is spent in that unparallelizable portion — so more
-workers speeds up the per-target loop around it but does not shrink that
-fixed cost. In the GUI, this shows up as the field ePSF and field solution
-stages always running before the (optionally parallel) per-target loop,
-each still logged as its own stage line.
+Gauss-Seidel simultaneous-solve sweeps are serial **by design** — each is
+one sequential computation, not a set of independent per-target jobs, so
+there is no per-task work to distribute regardless of the worker count.
+(The group-ePSF renders and the per-target measurements are the
+bandwidth-bound ones: real, parallel work whose speedup is limited by
+memory bandwidth, not by design.) Together `build_epsf` and the sweeps
+account for roughly 41% of a warm, psf_clean field-engine call measured
+serially — about 55% of the same call's wall time once the parallel
+portions are sped up on 8 workers, since shrinking the parallel part
+raises the serial remainder's share of the (now shorter) total. In the
+GUI, this shows up as the field ePSF and field solution stages always
+running before the (optionally parallel) per-target loop, each still
+logged as its own stage line.
 
 **Why parallel per-target order doesn't change the answer:** `EmpiricalPsf.
 at()` weights donor stars at the centre of its 1-arcsec cache bin rather

@@ -79,6 +79,28 @@ NIRC2_CSV_COLUMNS = [
 _DUP_POS_TOL_PX = 3.0
 
 
+def _resolve_workers_safe():
+    """`resolve_workers(None)`, defensively (PR-CP3 acceptance, Opus
+    2026-09-13, B1): an invalid `$KECK_AO_WORKERS` (unparseable, 0,
+    negative, or over the cap without `KECK_AO_WORKERS_UNCAPPED=1`)
+    must never stop the tool from starting -- a typo in someone's shell
+    profile is not a reason to refuse to open. Falls back to
+    `default_workers()` and prints ONE line naming the bad variable and
+    the error (same `WARNING:` convention as io.py/pipeline.py's own
+    non-fatal recoveries); never crashes, never silently swallows it.
+    Used both for the spin box's own default (`_build_nirc2_tab`) and
+    `mainwindow.py`'s config-load default -- one place, one behaviour."""
+    import os
+
+    from ...parallel import ENV_WORKERS, default_workers, resolve_workers
+    try:
+        return resolve_workers(None)
+    except ValueError as e:
+        print(f"  WARNING: ${ENV_WORKERS}={os.environ.get(ENV_WORKERS)!r} "
+              f"is invalid ({e}); using the default worker count instead")
+        return default_workers()
+
+
 class Nirc2StrehlTabMixin:
     def _build_nirc2_tab(self):
         w = QtWidgets.QWidget()
@@ -267,10 +289,10 @@ class Nirc2StrehlTabMixin:
         # 7 (never more than 8 outside an explicit T4 memory run), and
         # $KECK_AO_WORKERS_UNCAPPED is an env-only override, not exposed
         # here.
-        from ...parallel import WORKER_CAP, resolve_workers
+        from ...parallel import WORKER_CAP
         self.n2_workers = QtWidgets.QSpinBox()
         self.n2_workers.setRange(1, WORKER_CAP)
-        self.n2_workers.setValue(resolve_workers(None))
+        self.n2_workers.setValue(_resolve_workers_safe())
         self.n2_workers.setToolTip(
             "Worker processes for the per-target measurement loop when "
             "'Measure field' parallelizes it (parallel PLAN section 4). "
@@ -1221,7 +1243,7 @@ class Nirc2StrehlTabMixin:
             max(3 * n_req, n_req + 20),  # deeper candidate list: rejected
             photrad_px,                  # stars don't consume map slots
             self.n2_psf_clean.isChecked(), self._nirc2_psf_clean_engine(),
-            parent=self)
+            workers=self.n2_workers.value(), parent=self)
         w = self._n2_field_prologue
         w.stage.connect(self._nirc2_field_stage)
         w.positions_found.connect(self._nirc2_field_positions_found)

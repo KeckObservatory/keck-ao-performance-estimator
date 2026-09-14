@@ -38,7 +38,7 @@ from .tabs.fieldmap_view import FieldMapViewMixin
 from .tabs.lgs import LgsTabMixin
 from .tabs.ngs import NgsTabMixin
 from .tabs.nighttime import NighttimeModeMixin
-from .tabs.nirc2_strehl import Nirc2StrehlTabMixin
+from .tabs.nirc2_strehl import Nirc2StrehlTabMixin, _resolve_workers_safe
 from .tabs.prediction import PredictionTabMixin
 from .tabs.starlist_picker import StarlistPickerMixin
 from .tabs.summary_stats import SummaryStatsMixin
@@ -1256,9 +1256,16 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self.n2_psf_clean.setChecked(bool(n2.get("psf_clean", False)))
             self.n2_psf_clean_engine.setCurrentText(n2.get(
                 "psf_clean_engine", engine.PSF_CLEAN_DEFAULT_ENGINE))
-            from keck_ao_estimator.parallel import resolve_workers
-            self.n2_workers.setValue(int(n2.get(
-                "workers", resolve_workers(None))))
+            # PR-CP3 acceptance (Opus, B1): `n2.get("workers", <expr>)`
+            # evaluates <expr> eagerly even when "workers" IS present in
+            # a saved config, so an invalid $KECK_AO_WORKERS would raise
+            # while loading a config that never needed the default at
+            # all. Only resolve it (safely -- see _resolve_workers_safe)
+            # when the key is actually missing.
+            if "workers" in n2:
+                self.n2_workers.setValue(int(n2["workers"]))
+            else:
+                self.n2_workers.setValue(_resolve_workers_safe())
             self.n2_stretch.setCurrentText(n2.get("stretch", "IDL ±5σ"))
             self.n2_white.setValue(n2.get("white", 99.5))
             self.n2_nstars.setValue(int(n2.get("nstars", 5)))

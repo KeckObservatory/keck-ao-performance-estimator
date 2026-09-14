@@ -389,7 +389,18 @@ class FieldPrologueWorker(QThread):
     unusable ePSF, an empty catalogue, a non-converging solve all come
     back as a normal `FieldSolution` with `converged=False` and the
     reason in `.note`) -- `failed` is therefore only a genuine
-    programming error."""
+    programming error.
+
+    PR-CP3 acceptance (Opus, B2): `workers` reaches `solve_field`'s own
+    `workers=` too, so the field solution's group-ePSF renders use the
+    same persistent pool as the per-target loop instead of running
+    serially on this thread -- those renders are the single largest
+    parallel saving in the engine (API `solve_field` 5.31s -> 2.79s
+    parallel, `results/cp2/d12/d12_mf_timeline.log`), and leaving them
+    serial meant a warm-pool "Measure field" run only tied serial
+    instead of beating it. Identity for `solve_field(workers=N)` is
+    already asserted by `parallel_model.py` (c) (same stars, same
+    models as `workers=1`) -- no new identity work needed here."""
     stage = Signal(str)
     positions_found = Signal(list)
     catalog_built = Signal(object)
@@ -399,11 +410,12 @@ class FieldPrologueWorker(QThread):
     finished_all = Signal()
 
     def __init__(self, image, params, n_candidates, exclude_px, psf_clean,
-                engine_choice, parent=None):
+                engine_choice, workers=1, parent=None):
         super().__init__(parent)
         self.image, self.params = image, params
         self.n_candidates, self.exclude_px = n_candidates, exclude_px
         self.psf_clean, self.engine_choice = psf_clean, engine_choice
+        self.workers = workers
 
     def run(self):
         from ..epsf import build_epsf, deep_star_catalog
@@ -428,7 +440,8 @@ class FieldPrologueWorker(QThread):
                     self.stage.emit(
                         "building the field solution (one simultaneous "
                         f"solve of all {len(catalog)} stars)…")
-                    solution = solve_field(work, self.params, epsf, catalog)
+                    solution = solve_field(work, self.params, epsf, catalog,
+                                          workers=self.workers)
                     self.solution_built.emit(solution)
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")
