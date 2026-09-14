@@ -30,8 +30,9 @@ import keck_ao_estimator as engine
 
 from ..theme import set_cue
 from ..widgets import SortableItem, _dspin, _shrinkable_label
-from ..workers import (CatalogFetchWorker, FieldSolveWorker,
-                       NativeFilenameWorker, Nirc2MeasureWorker)
+from ..workers import (CatalogFetchWorker, FieldMeasureWorker,
+                       FieldPrologueWorker, NativeFilenameWorker,
+                       Nirc2MeasureWorker)
 from .starlist_picker import _starlist_entry_mags
 
 # field-map annotation text over the new image background needs a halo to
@@ -258,6 +259,32 @@ class Nirc2StrehlTabMixin:
         engine_row.addWidget(self.n2_psf_clean_engine)
         engine_row.addStretch(1)
         form.addRow(self._wrap(engine_row))
+        # parallel Phase 2 (PR-D13/T4): default shows the RESOLVED worker
+        # count for THIS box/environment (KECK_AO_WORKERS, else
+        # min(8, cpu_count() // 2)), not the literal `workers=None` the
+        # GUI passes -- resolve_workers(None) is exactly what measure_field
+        # itself would resolve to, so the box shows the truth. 1..8: RULES
+        # 7 (never more than 8 outside an explicit T4 memory run), and
+        # $KECK_AO_WORKERS_UNCAPPED is an env-only override, not exposed
+        # here.
+        from ...parallel import WORKER_CAP, resolve_workers
+        self.n2_workers = QtWidgets.QSpinBox()
+        self.n2_workers.setRange(1, WORKER_CAP)
+        self.n2_workers.setValue(resolve_workers(None))
+        self.n2_workers.setToolTip(
+            "Worker processes for the per-target measurement loop when "
+            "'Measure field' parallelizes it (parallel PLAN section 4). "
+            "Defaults to what this box resolves to on its own "
+            "($KECK_AO_WORKERS if set, else min(8, cpu_count() // 2)) -- "
+            f"capped at {WORKER_CAP} here regardless "
+            "($KECK_AO_WORKERS_UNCAPPED is an environment-only override "
+            "for batteries, not exposed in the GUI). 1 = serial, "
+            "bit-identical to every result before this feature existed.")
+        workers_row = QtWidgets.QHBoxLayout()
+        workers_row.addWidget(QtWidgets.QLabel("Workers:"))
+        workers_row.addWidget(self.n2_workers)
+        workers_row.addStretch(1)
+        form.addRow(self._wrap(workers_row))
         pick_row = QtWidgets.QHBoxLayout()
         pick_row.addWidget(self.n2_pick_sky)
         pick_row.addStretch(1)
@@ -1131,14 +1158,24 @@ class Nirc2StrehlTabMixin:
 
     # ---- measured field map --------------------------------------------------
     def _on_nirc2_measure_field(self):
-        """Auto-find the N brightest stars, then measure them one per
-        timer tick so the UI stays live: the button counts progress, each
-        star flashes in the MEASURED STAR panel as it is measured, and
-        kept points pop onto the map as they land.  Negative/over-unity
-        SR and saturated stars are rejected with a log line."""
-        if (getattr(self, "_n2_field_queue", None)
-                or getattr(self, "_n2_field_busy", False)):
-            return                          # already running
+        """Auto-find the N brightest stars, then measure them (in
+        parallel across `workers` processes when > 1) entirely off the
+        GUI thread: `FieldPrologueWorker` (find_stars, the catalogue, the
+        ePSF, the field solution) then `FieldMeasureWorker` (the
+        per-target loop, via `keck_ao_estimator.parallel.MeasureBatch`) --
+        parallel PR-CP3. No `processEvents()` loop anywhere in this flow
+        (that was PR-P0-3's fix for one stage of it; this is the same fix
+        applied to the whole flow). Each star still flashes in the
+        MEASURED STAR panel and kept points still pop onto the map as
+        they land -- `_nirc2_field_on_result` runs on the GUI thread, via
+        a queued signal, and does exactly what the old per-tick handler
+        did. While busy, this same button doubles as Cancel (PLAN section
+        4): a flag polled between targets, honoured within one target's
+        measurement, same as the fieldsolve P3-2/PR-P0-3 precedent for a
+        solve in flight."""
+        if getattr(self, "_n2_field_busy", False):
+            self._nirc2_cancel_field_measure()
+            return
         if self._n2_image is None or self._n2_params is None:
             self.n2_log.appendPlainText(
                 "! measure a frame first — the field map works on the "
@@ -1148,60 +1185,7 @@ class Nirc2StrehlTabMixin:
                       / self._n2_params.plate_scale_mas)
         n_req = self.n2_nstars.value() or 30    # 0 = Auto: quality decides
         self._n2_field_auto = self.n2_nstars.value() == 0
-        # Everything from here to the first timer tick runs on the GUI
-        # thread and can take 10-20 s on a crowded field (the deep
-        # catalogue alone measured 14 s on a Galactic-Centre frame), so
-        # each stage announces itself BEFORE it starts and the event loop
-        # is flushed so the line actually paints. `_n2_field_busy` is set
-        # first and checked above: flushing the loop lets the user click
-        # "Measure field" again, and re-entering this prologue would build
-        # a second catalogue and clobber the queue.
-        self._n2_field_busy = True
-        self.n2_field_btn.setEnabled(False)
-        QtWidgets.QApplication.setOverrideCursor(
-            Qt.CursorShape.WaitCursor)
-        try:
-            self._nirc2_stage("finding stars…")
-            # deeper candidate list so rejected stars don't consume map
-            # slots; the detection floors are the natural "no more good
-            # stars" stop
-            positions = engine.find_stars(
-                self._n2_image, n_stars=max(3 * n_req, n_req + 20),
-                exclude_px=photrad_px)
-            if not positions:
-                self.n2_log.appendPlainText(
-                    "field: no stars found above the detection floors")
-                return
-            self._nirc2_measure_field_setup(positions, n_req)
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
-            # a field solve still running on its worker thread keeps the
-            # prologue busy (button disabled, re-entry refused) until its
-            # slot runs -- parallel PR-P0-2: releasing it here re-enabled
-            # "Measure field" mid-solve, which is what FS-OPEN-7's
-            # diagnostics mistook for a hang
-            if not getattr(self, "_n2_field_solving", False):
-                self._n2_field_busy = False
-                if not getattr(self, "_n2_field_queue", None):
-                    self.n2_field_btn.setEnabled(True)
-                    self.n2_field_btn.setText("Measure field")
-
-    def _nirc2_stage(self, message):
-        """Announce a blocking stage and force it to paint.
-
-        These stages run on the GUI thread, so appending to the log is not
-        enough -- without flushing the event loop the text sits in the
-        widget unpainted until the work finishes, which is exactly the
-        blind hang this exists to remove. Re-entrancy is guarded by
-        `_n2_field_busy` in the caller.
-        """
-        self.n2_field_btn.setText(f"Measuring… ({message.rstrip('…')})")
-        self.n2_log.appendPlainText(f"  field: {message}")
-        QtWidgets.QApplication.processEvents()
-
-    def _nirc2_measure_field_setup(self, positions, n_req):
-        """The rest of the prologue, stage-announced. Split out so the
-        cursor/busy-flag cleanup in the caller covers every exit path."""
+        self._n2_field_n_req = n_req
         self._n2_field = []
         self._n2_field_dropped = []
         self._n2_ee_pairs = {}          # id(small-ap result) -> full-radius result
@@ -1212,67 +1196,96 @@ class Nirc2StrehlTabMixin:
         self._n2_field_epsf = None
         self._n2_field_catalog = None
         self._n2_field_solution = None
-        self._n2_field_positions = positions
-        self._n2_field_n_req = n_req
-        if self.n2_psf_clean.isChecked():
-            # the ePSF and deep neighbour catalogue are properties of the
-            # FIELD -- built ONCE here and shared across every tick, exactly
-            # as measure_field does internally and for the same reason:
-            # rebuilding per star is both slow and inconsistent (each star
-            # cleaned against a slightly different model). Progress
-            # messaging (this line) is the GUI's job per the WP-3 handoff;
-            # the build itself is the engine's.
-            work = engine.sigma_filter3(self._n2_image)
-            self._nirc2_stage("building the deep neighbour catalogue…")
-            self._n2_field_catalog = engine.deep_star_catalog(
-                work, self._n2_params)
-            n_cat = len(self._n2_field_catalog)
-            if getattr(self._n2_field_catalog, "truncated", False):
-                self.n2_log.appendPlainText(
-                    f"  field: catalogue capped at {n_cat} stars (the "
-                    "brightest); fainter detections are not modelled as "
-                    "neighbours")
-            self._nirc2_stage(
-                f"building the field ePSF from {n_cat} catalogued stars…")
-            self._n2_field_epsf = engine.build_epsf(
-                work, self._n2_params, catalog=self._n2_field_catalog)
-            ep = self._n2_field_epsf
-            tag = self._nirc2_psf_clean_tag()
-            self.n2_log.appendPlainText(
-                f"  {tag} field ePSF: tag={ep.tag!r} "
-                f"delta={ep.delta:.4f} converged={ep.converged} "
-                f"phase_coverage={ep.phase_coverage:.0%}"
-                + ("" if ep.usable else " -- cleaning will be skipped "
-                                        "for every star this field"))
-            if ep.usable and self._nirc2_psf_clean_engine() == "field":
-                # fieldsolve P3-2 / FS-CP3b: solve_field costs ~3.6s/frame
-                # on top of the ePSF build above, so it runs on a WORKER
-                # THREAD; the rest of the prologue continues from its slot.
-                # (FS-OPEN-7 was not a hang: parallel PR-P0-2 in
-                # keck_ao_experiments has the proof.)
-                self._nirc2_stage(
-                    "building the field solution (one simultaneous solve "
-                    f"of all {n_cat} stars)…")
-                self._n2_field_solve_worker = FieldSolveWorker(
-                    work, self._n2_params, ep, self._n2_field_catalog,
-                    parent=self)
-                self._n2_field_solve_worker.solution_done.connect(
-                    self._nirc2_field_solve_done)
-                self._n2_field_solve_worker.solution_failed.connect(
-                    self._nirc2_field_solve_failed)
-                # the solution belongs to THIS frame; a frame loaded while
-                # it builds makes it stale (see _nirc2_field_solve_release)
-                self._n2_field_solve_image = self._n2_image
-                self._n2_field_solving = True
-                self._n2_field_solve_worker.start()
-                return
-        self._nirc2_measure_field_continue()
+        self._n2_field_busy = True
+        self._n2_field_cancel_requested = False
+        # the solution/ePSF/catalogue this run produces belong to THIS
+        # frame; a frame loaded while it runs makes them stale (the same
+        # class of bug PR-P0-3 fixed for the solve step alone, generalized
+        # here to the whole prologue+measurement flow) -- see
+        # _nirc2_field_worker_stale
+        self._n2_field_worker_image = self._n2_image
+        self._n2_field_prologue = FieldPrologueWorker(
+            self._n2_image, self._n2_params,
+            max(3 * n_req, n_req + 20),  # deeper candidate list: rejected
+            photrad_px,                  # stars don't consume map slots
+            self.n2_psf_clean.isChecked(), self._nirc2_psf_clean_engine(),
+            parent=self)
+        w = self._n2_field_prologue
+        w.stage.connect(self._nirc2_field_stage)
+        w.positions_found.connect(self._nirc2_field_positions_found)
+        w.catalog_built.connect(self._nirc2_field_catalog_built)
+        w.epsf_built.connect(self._nirc2_field_epsf_built)
+        w.solution_built.connect(self._nirc2_field_solution_built)
+        w.failed.connect(self._nirc2_field_prologue_failed)
+        w.finished_all.connect(self._nirc2_field_prologue_finished)
+        w.start()
 
-    def _nirc2_field_solve_done(self, solution):
-        """FieldSolveWorker finished (converged or not -- a refusal is
-        reported per target later, via field_clean's own note, never
-        silently here)."""
-        if not self._nirc2_field_solve_release():
+    def _nirc2_cancel_field_measure(self):
+        """PLAN section 4 Cancel: a flag polled between targets (and,
+        for the prologue, before the per-target loop is even started) --
+        the smallest unit of already-running work is one blocking engine
+        call (find_stars / the catalogue / the ePSF / one solve / one
+        target's measure_strehl), none of which this GUI can interrupt
+        mid-call without an engine hook it does not have, so "within one
+        target" means "before the next one starts", same guarantee the
+        old per-tick design gave."""
+        if self._n2_field_cancel_requested:
+            return
+        self.n2_log.appendPlainText("  field: cancel requested")
+        self._n2_field_cancel_requested = True
+        measurer = getattr(self, "_n2_field_measurer", None)
+        if measurer is not None and measurer.isRunning():
+            measurer.request_stop()
+
+    def _nirc2_field_worker_stale(self):
+        """True once a NEW frame has loaded while the prologue/measurer
+        for an OLDER one is still running -- their results describe a
+        frame this tab has moved on from and must not be applied."""
+        return self._n2_image is not getattr(self, "_n2_field_worker_image",
+                                             None)
+
+    def _nirc2_field_discard_stale(self, what):
+        self.n2_log.appendPlainText(
+            f"  field: {what} discarded — the frame changed while it "
+            "was running")
+        self._nirc2_field_finish_summary(setup_failed=True)
+
+    def _nirc2_field_stage(self, message):
+        self.n2_field_btn.setText(f"Measuring… ({message.rstrip('…')}) "
+                                  "— click to cancel")
+        self.n2_log.appendPlainText(f"  field: {message}")
+
+    def _nirc2_field_positions_found(self, positions):
+        self._n2_field_positions = list(positions)
+        if not positions:
+            self.n2_log.appendPlainText(
+                "field: no stars found above the detection floors")
+
+    def _nirc2_field_catalog_built(self, cat):
+        if self._nirc2_field_worker_stale():
+            return
+        self._n2_field_catalog = cat
+        n_cat = len(cat)
+        if getattr(cat, "truncated", False):
+            self.n2_log.appendPlainText(
+                f"  field: catalogue capped at {n_cat} stars (the "
+                "brightest); fainter detections are not modelled as "
+                "neighbours")
+
+    def _nirc2_field_epsf_built(self, ep):
+        if self._nirc2_field_worker_stale():
+            return
+        self._n2_field_epsf = ep
+        tag = self._nirc2_psf_clean_tag()
+        self.n2_log.appendPlainText(
+            f"  {tag} field ePSF: tag={ep.tag!r} "
+            f"delta={ep.delta:.4f} converged={ep.converged} "
+            f"phase_coverage={ep.phase_coverage:.0%}"
+            + ("" if ep.usable else " -- cleaning will be skipped "
+                                    "for every star this field"))
+
+    def _nirc2_field_solution_built(self, solution):
+        if self._nirc2_field_worker_stale():
             return
         self._n2_field_solution = solution
         tag = self._nirc2_psf_clean_tag()
@@ -1280,124 +1293,72 @@ class Nirc2StrehlTabMixin:
             f"  {tag} field solution: {solution.n_live} star(s) solved, "
             f"converged={solution.converged}, n_sweeps={solution.n_sweeps}, "
             f"{solution.n_groups} group(s)"
-            + ("" if solution.converged
-               else f" -- {solution.note}"))
-        self._nirc2_measure_field_continue()
+            + ("" if solution.converged else f" -- {solution.note}"))
 
-    def _nirc2_field_solve_failed(self, message):
-        """The worker itself raised (a programming error, not a data
-        refusal -- solve_field never raises for a data condition per its
-        own contract). Logged and treated as no solution: every target
-        this field falls back to clean_star's own on-the-fly build (same
-        as a pick before this worker existed), not a silent skip."""
-        if not self._nirc2_field_solve_release():
-            return
+    def _nirc2_field_prologue_failed(self, message):
         tag = self._nirc2_psf_clean_tag()
         self.n2_log.appendPlainText(
-            f"  {tag} field solution build FAILED unexpectedly: {message} "
-            "-- each target will build its own on the fly instead")
-        self._n2_field_solution = None
-        self._nirc2_measure_field_continue()
+            f"  {tag} field measurement setup FAILED unexpectedly: "
+            f"{message}")
+        self._nirc2_field_finish_summary(setup_failed=True)
 
-    def _nirc2_field_solve_release(self):
-        """Called first by both field-solve slots: release the prologue the
-        worker was holding busy. Returns False, after saying so in the log,
-        when the frame changed while the solution was being built -- that
-        solution describes the OLD frame and must not clean the new one."""
-        self._n2_field_solving = False
-        self._n2_field_busy = False
-        if self._n2_image is not getattr(self, "_n2_field_solve_image", None):
-            self.n2_log.appendPlainText(
-                f"  {self._nirc2_psf_clean_tag()} field solution discarded "
-                "-- the frame changed while it was being built")
-            self.n2_field_btn.setEnabled(True)
-            self.n2_field_btn.setText("Measure field")
-            return False
-        return True
-
-    def _nirc2_measure_field_continue(self):
-        """The tail of the prologue -- unchanged from before P3-2 except
-        that it may now run from the field-solve worker's slot instead of
-        directly after the ePSF build."""
-        self._n2_field_queue = list(self._n2_field_positions)
-        self._n2_field_target = self._n2_field_n_req
-        self._n2_field_tried = 0
-        self._n2_field_poor = 0
-        self.n2_field_btn.setEnabled(False)
-        QtCore.QTimer.singleShot(0, self._nirc2_field_tick)
-
-    def _nirc2_field_tick(self):
-        queue = self._n2_field_queue
-        kept = len(self._n2_field)
-        if not queue or kept >= self._n2_field_target:
-            self._nirc2_apply_ee()      # convention fix BEFORE the clip
-            # field self-consistency (Eduardo: 0.61 next to 0.35 next to
-            # 0.09 in one frame is not physics): gradient-aware MAD
-            # filter in both metrics -- residuals about a robust plane,
-            # so stars riding the anisoplanatic falloff stay (Eduardo
-            # 2026-07-25: the median clip was discarding the well-
-            # corrected minority on the asterism side).  Dropped stars
-            # stay on the map as × markers -- click one to inspect and
-            # reinsert it; dropped outliers hand their slots back to
-            # the backfill when candidates remain
-            keep, dropped = engine.field_consistent(self._n2_field)
-            if dropped:
-                s_med = float(np.median([r.strehl for r in keep])) \
-                    if keep else float("nan")
-                for r in dropped:
-                    self.n2_log.appendPlainText(
-                        f"  rejected as field outlier — SR {r.strehl:.2f} "
-                        f"/ FWHM {r.fwhm_mas:.1f} mas off the local trend "
-                        f"(field median SR {s_med:.2f}) — × on the map, "
-                        f"click to inspect / reinsert")
-                self._n2_field_dropped = (
-                    getattr(self, "_n2_field_dropped", None) or []) + dropped
-                self._n2_field = keep
-                self._nirc2_clear_selection()   # indices shifted
-                self._nirc2_draw_map()
-                if queue and len(keep) < self._n2_field_target:
-                    QtCore.QTimer.singleShot(10, self._nirc2_field_tick)
-                    return
-            self._n2_field_queue = None
-            self.n2_field_btn.setEnabled(True)
-            self.n2_field_btn.setText("Measure field")
-            self.n2_cap_star.setText("MEASURED STAR")
-            if self._n2_field_auto:
-                summary = (f"field: kept {kept} quality star(s) — auto "
-                           f"stop at SR noise ±{engine.SR_ERR_MAX} "
-                           f"({self._n2_field_tried} candidate(s) tried)")
-            else:
-                summary = (f"field: kept {kept} of "
-                           f"{self._n2_field_target} requested "
-                           f"({self._n2_field_tried} candidate(s) tried)")
-                if kept < self._n2_field_target:
-                    summary += (" — field exhausted above the detection "
-                                "floors")
-            self.n2_log.appendPlainText(summary)
-            self._nirc2_draw_map()
-            if getattr(self, "_n2_field_st", None) is not None:
-                self.n2_log.appendPlainText(
-                    "field stats: "
-                    + self._nirc2_field_stats_text(self._n2_field_st))
+    def _nirc2_field_prologue_finished(self):
+        if self._nirc2_field_worker_stale():
+            self._nirc2_field_discard_stale("field measurement setup")
             return
-        x, y = queue.pop(0)
-        self._n2_field_tried += 1
-        k = self._n2_field_tried
-        self.n2_field_btn.setText(
-            f"Measuring… {kept}/{self._n2_field_target} kept ({k} tried)")
+        if (self._n2_field_cancel_requested
+                or not getattr(self, "_n2_field_positions", None)):
+            self._nirc2_field_finish_summary()
+            return
+        self._n2_field_tried = 0
+        self._n2_field_target = self._n2_field_n_req
+        self._n2_field_poor = 0
         photrad, bgin, bgout, peakrad = self._nirc2_radii()
-        r = engine.measure_strehl(
-            self._n2_image, params=self._n2_params, pos=(x, y),
+        self._n2_field_measure_radii = (photrad, bgin, bgout, peakrad)
+        self._nirc2_field_start_measurer(self._n2_field_positions)
+
+    def _nirc2_field_start_measurer(self, positions):
+        """(Re)start `FieldMeasureWorker` over `positions` -- used both
+        for the initial per-target pass and, when field-consistency drops
+        outliers with map slots and candidates left, to backfill from the
+        remaining not-yet-tried positions (same behaviour as the old
+        per-tick design's own backfill)."""
+        photrad, bgin, bgout, peakrad = self._n2_field_measure_radii
+        measure_kw = dict(
             background_subtracted=self._n2_bg_used,
             photometry_radius_arcsec=photrad, bg_inner_arcsec=bgin,
             bg_outer_arcsec=bgout, peak_radius_arcsec=peakrad,
-            dl_psf=self._n2_dl, robust_sky=self.n2_robust_sky.isChecked(),
+            robust_sky=self.n2_robust_sky.isChecked(),
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
             psf_clean=self.n2_psf_clean.isChecked(),
             epsf=self._n2_field_epsf, star_catalog=self._n2_field_catalog,
             psf_clean_engine=self._nirc2_psf_clean_engine(),
-            field_solution=getattr(self, "_n2_field_solution", None))
+            field_solution=self._n2_field_solution)
+        workers = self.n2_workers.value() if hasattr(self, "n2_workers") else 1
+        self._n2_field_measurer = FieldMeasureWorker(
+            self._n2_image, self._n2_params, self._n2_dl, measure_kw,
+            positions, workers, parent=self)
+        m = self._n2_field_measurer
+        m.target_result.connect(self._nirc2_field_on_result)
+        m.finished_all.connect(self._nirc2_field_measure_finished)
+        m.failed.connect(self._nirc2_field_measure_failed)
+        m.start()
+
+    def _nirc2_field_on_result(self, r, k):
+        """Runs on the GUI thread (a queued-connection slot) -- exactly
+        the decision/UI logic the old `_nirc2_field_tick` applied after
+        each measurement, unchanged, just triggered by a signal from
+        `FieldMeasureWorker` instead of by a `QTimer` chain reading from
+        a GUI-thread-blocking call."""
+        if self._n2_field_cancel_requested or self._nirc2_field_worker_stale():
+            return   # a couple of already-in-flight results may still land
+        kept = len(self._n2_field)
+        self._n2_field_tried += 1
+        self.n2_field_btn.setText(
+            f"Measuring… {kept}/{self._n2_field_target} kept ({k} tried) "
+            "— click to cancel")
+        photrad, bgin, bgout, peakrad = self._n2_field_measure_radii
         self._nirc2_flash_star(r, k)
         verdict = self._nirc2_field_accept(r)
         if verdict is None and self._n2_field_auto and r.sr_err > engine.SR_ERR_MAX:
@@ -1405,7 +1366,7 @@ class Nirc2StrehlTabMixin:
             verdict = (f"quality gate — ±{r.sr_err:.3f} SR noise "
                        f"(limit ±{engine.SR_ERR_MAX})")
             if self._n2_field_poor >= 2:
-                self._n2_field_queue = []   # fainter ones only get worse
+                self._n2_field_measurer.request_stop()  # fainter ones only get worse
         elif verdict is None:
             self._n2_field_poor = 0
         if verdict is None and self.n2_psf_clean.isChecked():
@@ -1427,7 +1388,9 @@ class Nirc2StrehlTabMixin:
             self._n2_field.append(r)
             # EE aperture correction: a small-aperture star gets a
             # companion FULL-radius measurement; clean pairs calibrate
-            # the field's h at completion (Eduardo 2026-07-25)
+            # the field's h at completion (Eduardo 2026-07-25). Stays a
+            # synchronous GUI-thread call (a single extra measure_strehl,
+            # not a multi-second stage) -- not the target of this fix.
             if (self.n2_ee_corr.isChecked()
                     and self.n2_auto_rad.isChecked()
                     and r.photrad_used_arcsec < photrad * 0.9):
@@ -1453,7 +1416,80 @@ class Nirc2StrehlTabMixin:
                 + ("  [crowded]" if r.crowded else ""))
         else:
             self.n2_log.appendPlainText(f"  star {k}: rejected — {verdict}")
-        QtCore.QTimer.singleShot(10, self._nirc2_field_tick)
+        if len(self._n2_field) >= self._n2_field_target:
+            self._n2_field_measurer.request_stop()
+
+    def _nirc2_field_measure_failed(self, message):
+        tag = self._nirc2_psf_clean_tag() if self.n2_psf_clean.isChecked() \
+            else "[field]"
+        self.n2_log.appendPlainText(
+            f"  {tag} field measurement FAILED unexpectedly: {message}")
+        self._nirc2_field_finish_summary(setup_failed=True)
+
+    def _nirc2_field_measure_finished(self):
+        if self._nirc2_field_worker_stale():
+            self._nirc2_field_discard_stale("field measurement")
+            return
+        # field self-consistency (Eduardo: 0.61 next to 0.35 next to
+        # 0.09 in one frame is not physics): gradient-aware MAD
+        # filter in both metrics -- residuals about a robust plane,
+        # so stars riding the anisoplanatic falloff stay (Eduardo
+        # 2026-07-25: the median clip was discarding the well-
+        # corrected minority on the asterism side).  Dropped stars
+        # stay on the map as × markers -- click one to inspect and
+        # reinsert it; dropped outliers hand their slots back to
+        # the backfill when candidates remain
+        self._nirc2_apply_ee()      # convention fix BEFORE the clip
+        keep, dropped = engine.field_consistent(self._n2_field)
+        if dropped:
+            s_med = float(np.median([r.strehl for r in keep])) \
+                if keep else float("nan")
+            for r in dropped:
+                self.n2_log.appendPlainText(
+                    f"  rejected as field outlier — SR {r.strehl:.2f} "
+                    f"/ FWHM {r.fwhm_mas:.1f} mas off the local trend "
+                    f"(field median SR {s_med:.2f}) — × on the map, "
+                    f"click to inspect / reinsert")
+            self._n2_field_dropped = (
+                getattr(self, "_n2_field_dropped", None) or []) + dropped
+            self._n2_field = keep
+            self._nirc2_clear_selection()   # indices shifted
+            self._nirc2_draw_map()
+            remaining = self._n2_field_positions[self._n2_field_tried:]
+            if (remaining and len(keep) < self._n2_field_target
+                    and not self._n2_field_cancel_requested):
+                self._nirc2_field_start_measurer(remaining)
+                return
+        self._nirc2_field_finish_summary()
+
+    def _nirc2_field_finish_summary(self, setup_failed=False):
+        self._n2_field_busy = False
+        self.n2_field_btn.setEnabled(True)
+        self.n2_field_btn.setText("Measure field")
+        if setup_failed:
+            return
+        self.n2_cap_star.setText("MEASURED STAR")
+        kept = len(self._n2_field)
+        tried = getattr(self, "_n2_field_tried", 0)
+        if self._n2_field_cancel_requested:
+            summary = f"field: cancelled — {kept} kept ({tried} tried)"
+        elif self._n2_field_auto:
+            summary = (f"field: kept {kept} quality star(s) — auto "
+                       f"stop at SR noise ±{engine.SR_ERR_MAX} "
+                       f"({tried} candidate(s) tried)")
+        else:
+            summary = (f"field: kept {kept} of "
+                       f"{getattr(self, '_n2_field_target', kept)} requested "
+                       f"({tried} candidate(s) tried)")
+            if kept < getattr(self, "_n2_field_target", kept):
+                summary += (" — field exhausted above the detection "
+                            "floors")
+        self.n2_log.appendPlainText(summary)
+        self._nirc2_draw_map()
+        if getattr(self, "_n2_field_st", None) is not None:
+            self.n2_log.appendPlainText(
+                "field stats: "
+                + self._nirc2_field_stats_text(self._n2_field_st))
 
     def _nirc2_apply_ee(self):
         """EE aperture correction at field completion (Eduardo

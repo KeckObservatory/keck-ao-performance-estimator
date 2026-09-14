@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
-"""parallel PR-P0-2/PR-P0-3 (Sonnet, 2026-09-13): the field-solve fix --
-`FieldSolveWorker` really does run on a QThread from the live "Measure
-field" flow now (`.start()`, not `.run()`), the prologue stays correctly
-busy until its slot runs, and a frame replaced mid-solve discards the
-stale solution instead of cleaning the new frame against the old one.
+"""parallel PR-P0-3 (Sonnet, 2026-09-13) / Phase 2 (2026-09-13): the
+field-solve fix, updated for Phase 2's `FieldPrologueWorker` (which
+generalizes fieldsolve P3-2's narrower `FieldSolveWorker` to the WHOLE
+"Measure field" prologue -- find_stars, the catalogue, the ePSF, and the
+solve, all off the GUI thread) -- and the Cancel button Phase 2 adds.
 
 FS-OPEN-7 was never a hang (parallel/STATUS.md PR-P0-2): every earlier
-"hang" was a diagnostic polling `n2_field_btn.isEnabled()`, which the
-shipped `finally` re-enabled the instant `_on_nirc2_measure_field`
-returned, regardless of whether the solve had actually finished. This
-regress ports `parallel/p02/pr_p02_fix_check.py` (the spec validated
-against Opus's fix in a scratch tree) checks (a)-(d) verbatim onto the
-gui_phase34/37 fixture and pattern:
-  (a) the solve is a REAL running QThread, the button stays disabled
-      while it runs, and a second click during the solve is a no-op;
+"hang" was a diagnostic polling `n2_field_btn.isEnabled()`. Phase 2 makes
+that button double as Cancel while busy, so it is deliberately never
+disabled any more -- checks here use `win._n2_field_busy` instead, the
+same fix generalized.
+  (a) the prologue is a REAL running QThread; the flow is busy (not the
+      button's enabled state, which now means "click to cancel"); a
+      SECOND click while busy CANCELS (this is Phase 2's Cancel, not a
+      no-op -- the old "second click is a no-op" behaviour is gone by
+      design);
   (b) the solution is logged within 30 s, and a 50 ms QTimer fires at
-      least once DURING the solve (proves the GUI thread is not
-      blocked -- this is the actual T1-adjacent evidence, not just "it
-      finishes eventually");
+      least once DURING the solve (the GUI thread is not blocked);
   (c) the field measurement completes, with the ePSF line before the
       solution line before the first star line (order, not just
       presence);
-  (d) re-measuring the frame while a second solve is still building
-      makes that solution stale; it is discarded with the exact log
-      line, never used to clean the new frame.
+  (d) re-measuring the frame while a second prologue is still building
+      makes its result stale; it is discarded with the exact log line,
+      never used to clean the new frame.
 
 Fully offline; run headless (QT_QPA_PLATFORM=offscreen).
 """
@@ -45,7 +44,7 @@ from qtcompat import QtCore, QtWidgets
 
 import gui_phase34 as p34
 import keck_ao_estimator.gui as gui
-from keck_ao_estimator.gui.workers import FieldSolveWorker
+from keck_ao_estimator.gui.workers import FieldPrologueWorker
 
 FAILURES = []
 
@@ -110,23 +109,26 @@ def main():
     timer.timeout.connect(lambda: ticks.__setitem__("n", ticks["n"] + 1))
     timer.start(50)
 
-    # ---- (a) real thread, prologue held busy, re-entry refused ----------
+    # ---- (a) real thread, flow held busy, second click cancels ----------
     win._on_nirc2_measure_field()
-    w = win._n2_field_solve_worker
-    check("a: solve runs on a real QThread from the live flow",
-          isinstance(w, FieldSolveWorker) and w.isRunning(),
+    w = win._n2_field_prologue
+    check("a: the prologue runs on a real QThread from the live flow",
+          isinstance(w, FieldPrologueWorker) and w.isRunning(),
           f"isRunning={w.isRunning()}")
-    check("a: Measure field stays disabled while the solve runs",
-          not win.n2_field_btn.isEnabled())
-    n_cat_before = win.n2_log.toPlainText().count(
-        "building the deep neighbour catalogue")
-    win._on_nirc2_measure_field()
-    check("a: a second click during the solve is a no-op",
-          win._n2_field_solve_worker is w
-          and win.n2_log.toPlainText().count(
-              "building the deep neighbour catalogue") == n_cat_before)
+    check("a: the flow is busy while it runs (Cancel, not disabled -- "
+          "the button now doubles as Cancel)",
+          win._n2_field_busy and win.n2_field_btn.isEnabled())
+    win._on_nirc2_measure_field()   # a second click while busy: CANCEL
+    check("a: a second click during the prologue CANCELS (Phase 2)",
+          win._n2_field_cancel_requested)
+    pump(lambda: not win._n2_field_busy, timeout=30)
+    check("a: cancelling mid-prologue ends the flow (not busy any more)",
+          not win._n2_field_busy)
 
-    # ---- (b) solution within 30s, GUI thread free meanwhile -------------
+    # ---- (b) solution within 30s, GUI thread free meanwhile, for real
+    # this time (not cancelled) --------------------------------------------
+    win.n2_log.clear()
+    win._on_nirc2_measure_field()
     ticks["n"] = 0
     t0 = time.perf_counter()
     got = pump(lambda: "[psf-clean:field] field solution:"
@@ -138,8 +140,7 @@ def main():
           ticks_during_solve >= 1, f"{ticks_during_solve} ticks in {dt:.2f}s")
 
     # ---- (c) completion, lines in the right order ------------------------
-    done = pump(lambda: win.n2_field_btn.isEnabled()
-               and not getattr(win, "_n2_field_queue", None), timeout=120)
+    done = pump(lambda: not win._n2_field_busy, timeout=120)
     log = win.n2_log.toPlainText()
     i_epsf = log.find("field ePSF:")
     i_sol = log.find("field solution:")
@@ -150,25 +151,25 @@ def main():
 
     timer.stop()
 
-    # ---- (d) frame replaced mid-solve -> the late solution is discarded --
+    # ---- (d) frame replaced mid-prologue -> the late result is discarded --
     win._on_nirc2_field_clear()
     win._on_nirc2_measure_field()
-    w2 = win._n2_field_solve_worker
-    check("d: second field solve started", w2 is not w and w2.isRunning())
+    w2 = win._n2_field_prologue
+    check("d: second field prologue started", w2 is not w and w2.isRunning())
     win._on_nirc2_go()  # re-measures the SAME frame path: a NEW reduced array
     pump(lambda: w2.isFinished() and win.n2_go.isEnabled(), timeout=60)
     pump(lambda: False, timeout=1.0)  # let any queued slot run
     log2 = win.n2_log.toPlainText()[len(log):]
     last = log2.strip().splitlines()[-1][:90] if log2.strip() else ""
-    check("d: a solution for a replaced frame is discarded, legibly",
-          "field solution discarded -- the frame changed" in log2
+    check("d: a result for a replaced frame is discarded, legibly",
+          "discarded — the frame changed while it was running" in log2
           and win._n2_field_solution is None
-          and not getattr(win, "_n2_field_queue", None)
+          and not win._n2_field_busy
           and win.n2_field_btn.isEnabled(),
           last)
 
     # ---- wait for every worker to finish before the script exits (R7) ----
-    for name in ("_n2_field_solve_worker", "_n2_worker"):
+    for name in ("_n2_field_prologue", "_n2_field_measurer", "_n2_worker"):
         worker = getattr(win, name, None)
         if worker is not None:
             worker.wait(30000)

@@ -5,8 +5,9 @@ field), its config round-trip, per-target threading of the engine
 choice, `[psf-clean:field]` log lines (a real subtraction and the
 null/refusal outcomes VERBATIM, including "field solution did not
 converge"), and the once-per-frame field-solution build running on a
-WORKER THREAD (`FieldSolveWorker`), not blocking the GUI thread the way
-the ePSF build's `_nirc2_stage()` calls do.
+WORKER THREAD (`FieldPrologueWorker`, parallel Phase 2 -- supersedes
+fieldsolve P3-2's narrower `FieldSolveWorker`), not blocking the GUI
+thread the way `_nirc2_stage()`'s old `processEvents()` calls did.
 
 Reuses gui_phase34.py's crowded synthetic field (same donor/target/
 neighbour geometry, the validated psf_clean test fixture) rather than
@@ -35,7 +36,7 @@ from qtcompat import QtCore, QtWidgets
 
 import gui_phase34 as p34
 import keck_ao_estimator.gui as gui
-from keck_ao_estimator.gui.workers import FieldSolveWorker
+from keck_ao_estimator.gui.workers import FieldPrologueWorker
 
 
 def pump(cond, timeout=120):
@@ -132,13 +133,12 @@ def main():
     win.n2_add_star.setChecked(False)
     win.n2_nstars.setValue(6)
     win._on_nirc2_measure_field()
-    assert isinstance(win._n2_field_solve_worker, FieldSolveWorker), \
-        "the once-per-frame solve must go through FieldSolveWorker"
-    # wait for the SOLUTION and then the queue: the button alone is not a
-    # completion signal (parallel PR-P0-2)
-    pump(lambda: "[psf-clean:field] field solution:" in win.n2_log.toPlainText())
-    pump(lambda: win.n2_field_btn.isEnabled()
-         and not getattr(win, "_n2_field_queue", None))
+    assert isinstance(win._n2_field_prologue, FieldPrologueWorker), \
+        "the once-per-frame solve must go through FieldPrologueWorker"
+    # wait for the whole flow (prologue -> per-target loop) to finish --
+    # _n2_field_busy, not the button (which stays enabled throughout so
+    # it can double as Cancel, parallel Phase 2) or a since-removed queue
+    pump(lambda: not win._n2_field_busy)
     log = win.n2_log.toPlainText()
     assert "[psf-clean:field] field ePSF:" in log, log
     assert "[psf-clean:field] field solution:" in log, log
@@ -149,7 +149,7 @@ def main():
     sol_line = log[i_sol:log.find("\n", i_sol) if "\n" in log[i_sol:] else None]
     assert "converged=True" in sol_line, log
     print("  [ok] field engine: solution built ONCE per frame via "
-          "FieldSolveWorker, logged after the ePSF")
+          "FieldPrologueWorker, logged after the ePSF")
 
     win._on_nirc2_field_clear()
     win.n2_autofind.setChecked(False)
@@ -193,9 +193,7 @@ def main():
         win.n2_autofind.setChecked(True)
         win.n2_add_star.setChecked(False)
         win._on_nirc2_measure_field()
-        pump(lambda: win._n2_field_solve_worker.isFinished()
-             and win.n2_field_btn.isEnabled()
-             and not getattr(win, "_n2_field_queue", None))
+        pump(lambda: not win._n2_field_busy)
     finally:
         fs.solve_field = real_solve_field
     log = win.n2_log.toPlainText()

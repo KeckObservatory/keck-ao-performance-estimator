@@ -526,8 +526,12 @@ def main():
     assert win.n2_view_tabs.tabText(0) == "Image"
     assert win.n2_view_tabs.tabText(1) == "Field map"
     win._on_nirc2_measure_field()
-    assert not win.n2_field_btn.isEnabled(), "field run disables the button"
-    pump(lambda: win.n2_field_btn.isEnabled())
+    # parallel Phase 2 (2026-09-13): the button now doubles as Cancel while
+    # a field run is busy, so it is deliberately never disabled any more --
+    # busy state lives in `_n2_field_busy` (same fix as gui_phase34/37/38).
+    assert win._n2_field_busy and win.n2_field_btn.isEnabled(), \
+        "field run is busy; the button stays enabled to double as Cancel"
+    pump(lambda: not win._n2_field_busy)
     assert win.n2_field_btn.text() == "Measure field", "progress text reset"
     assert len(win._n2_field) == 1, len(win._n2_field)   # one star planted
     assert win.n2_map_fig.axes and win.n2_map_fig.axes[0].collections, \
@@ -647,7 +651,7 @@ def main():
     # (tiny propagated SR noise) so it is kept and the run reports the gate
     win.n2_nstars.setValue(0)
     win._on_nirc2_measure_field()
-    pump(lambda: win.n2_field_btn.isEnabled())
+    pump(lambda: not win._n2_field_busy)
     assert len(win._n2_field) >= 1, "auto mode keeps the quality star"
     assert all(r.sr_err <= engine.SR_ERR_MAX for r in win._n2_field)
     assert "quality star(s) — auto stop at SR noise" in \

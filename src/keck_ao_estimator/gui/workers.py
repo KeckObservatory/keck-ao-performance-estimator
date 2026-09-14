@@ -1,16 +1,22 @@
 """Worker threads that run engine calls off the GUI thread: PrepareWorker
 (the expensive prepare_night fetch/parse step), SkyFetchWorker (the DSS/2MASS
 cutout download for the field-map backdrop), CatalogFetchWorker (the Vizier
-guide-star lookup), ResolveWorker (the SIMBAD target-name lookup), and
-FieldSolveWorker (fieldsolve P3-2: the field engine's once-per-frame
-solve_field() call, ~3.6s/frame per FS-CP3b -- too slow to run on the GUI
-thread the way the ePSF build's blocking _nirc2_stage() calls do).
-nirc2_strehl.py starts it with .start() from the Measure-field flow and
-keeps that flow busy until its slot runs (parallel PR-P0-2; FS-OPEN-7 was a
-diagnostic that read a re-enabled button as a hang, not a threading fault).
+guide-star lookup), ResolveWorker (the SIMBAD target-name lookup),
+FieldPrologueWorker (parallel Phase 2: the WHOLE "Measure field" prologue --
+find_stars, the deep neighbour catalogue, the field ePSF and, for the field
+engine, solve_field -- off the GUI thread, superseding fieldsolve P3-2's
+narrower FieldSolveWorker, which covered only the solve step and left
+find_stars/catalogue/ePSF blocking the GUI thread behind processEvents()
+calls), and FieldMeasureWorker (the per-target measurement loop, dispatched
+through keck_ao_estimator.parallel.MeasureBatch so workers > 1 genuinely
+parallelizes it, exactly the machinery measure_field() itself uses
+internally). Together these two remove every processEvents() call from the
+Measure-field flow (parallel PR-CP3); Nirc2MeasureWorker (the Run sequence)
+already had none.
 """
 import contextlib
 import io
+import threading
 
 from qtcompat import QtCore, QThread, Signal
 
@@ -363,40 +369,141 @@ class Nirc2MeasureWorker(QThread):
         self.finished_all.emit()
 
 
-class FieldSolveWorker(QThread):
-    """fieldsolve P3-2: builds one `FieldSolution` off the GUI thread.
+class FieldPrologueWorker(QThread):
+    """parallel Phase 2 (PR-CP3): the WHOLE "Measure field" prologue --
+    find_stars, the deep neighbour catalogue, the field ePSF, and (engine
+    "field") solve_field -- off the GUI thread, emitting a `stage` signal
+    before each step (the same wording `_nirc2_stage()` used to print)
+    instead of a blocking `processEvents()` call.
 
-    `solve_field` costs about 3.6 s per frame on a typical box (FS-CP3b),
-    on top of the ePSF/catalogue build `_nirc2_measure_field_setup`
-    already does synchronously with `_nirc2_stage()` (a blocking call with
-    `processEvents()`, not a thread) -- adding that much more blocking
-    work to the same call would freeze "Measure field" for multiple
-    seconds. This follows the same QThread pattern as `Nirc2MeasureWorker`
-    (a plain worker with done/failed signals) rather than reusing that
-    class, since its `run()` loop is for the sequential single-star-per-
-    frame Run sequence, a different shape of work.
+    Supersedes fieldsolve P3-2's `FieldSolveWorker`: that class only
+    covered the solve step (~3.6s/frame, FS-CP3b) and left find_stars/the
+    catalogue/the ePSF build blocking the GUI thread behind
+    `_nirc2_stage()`'s `processEvents()` calls. This is the FS-OPEN-7
+    lesson applied to the whole flow (parallel PR-P0-2/P0-3), not just
+    the one stage that happened to be measured first.
 
-    `solve_field` never raises for a DATA condition (an unusable ePSF, an
-    empty catalogue, a non-converging solve all come back as a normal
-    `FieldSolution` with `converged=False` and the reason in `.note`) --
-    `solution_failed` is therefore only a genuine programming error, and
-    `solution_done` covers every ordinary refusal too; the caller decides
-    what a non-converged solution means for logging and for whether any
-    target can be cleaned this field."""
-    solution_done = Signal(object)
-    solution_failed = Signal(str)
+    `psf_clean=False` still finds stars here (off the GUI thread) but
+    skips the catalogue/ePSF/solve entirely, matching the byte-identical
+    default path. `solve_field` never raises for a DATA condition (an
+    unusable ePSF, an empty catalogue, a non-converging solve all come
+    back as a normal `FieldSolution` with `converged=False` and the
+    reason in `.note`) -- `failed` is therefore only a genuine
+    programming error."""
+    stage = Signal(str)
+    positions_found = Signal(list)
+    catalog_built = Signal(object)
+    epsf_built = Signal(object)
+    solution_built = Signal(object)
+    failed = Signal(str)
+    finished_all = Signal()
 
-    def __init__(self, work, params, epsf, catalog, parent=None):
+    def __init__(self, image, params, n_candidates, exclude_px, psf_clean,
+                engine_choice, parent=None):
         super().__init__(parent)
-        self.work, self.params = work, params
-        self.epsf, self.catalog = epsf, catalog
+        self.image, self.params = image, params
+        self.n_candidates, self.exclude_px = n_candidates, exclude_px
+        self.psf_clean, self.engine_choice = psf_clean, engine_choice
 
     def run(self):
+        from ..epsf import build_epsf, deep_star_catalog
         from ..field_solve import solve_field
+        from ..image_strehl import find_stars, sigma_filter3
         try:
-            solution = solve_field(
-                self.work, self.params, self.epsf, self.catalog)
+            self.stage.emit("finding stars…")
+            positions = find_stars(self.image, n_stars=self.n_candidates,
+                                   exclude_px=self.exclude_px)
+            self.positions_found.emit(positions)
+            if positions and self.psf_clean:
+                work = sigma_filter3(self.image)
+                self.stage.emit("building the deep neighbour catalogue…")
+                catalog = deep_star_catalog(work, self.params)
+                self.catalog_built.emit(catalog)
+                self.stage.emit(
+                    f"building the field ePSF from {len(catalog)} "
+                    "catalogued stars…")
+                epsf = build_epsf(work, self.params, catalog=catalog)
+                self.epsf_built.emit(epsf)
+                if epsf.usable and self.engine_choice == "field":
+                    self.stage.emit(
+                        "building the field solution (one simultaneous "
+                        f"solve of all {len(catalog)} stars)…")
+                    solution = solve_field(work, self.params, epsf, catalog)
+                    self.solution_built.emit(solution)
         except Exception as e:
-            self.solution_failed.emit(f"{type(e).__name__}: {e}")
+            self.failed.emit(f"{type(e).__name__}: {e}")
             return
-        self.solution_done.emit(solution)
+        self.finished_all.emit()
+
+
+class FieldMeasureWorker(QThread):
+    """parallel Phase 2 (PR-CP3): the "Measure field" per-target loop, off
+    the GUI thread, using the SAME parallel machinery `measure_field`
+    itself uses internally (`keck_ao_estimator.parallel.MeasureBatch`) --
+    this generalizes the `FieldSolveWorker` pattern to the per-target
+    measurement loop rather than replacing it with something new.
+
+    Deliberately NOT a call to the top-level `measure_field()`: that
+    function is a single opaque call with no per-result hook, and the GUI
+    needs each result AS IT ARRIVES (to flash the star panel, apply the
+    accept/reject/quality-gate decision, and pop it onto the map one at a
+    time) plus the ability to stop after any one of them (Cancel). Both
+    need a signal per target, which only the lower-level `MeasureBatch`
+    (the same class `measure_field` calls) can give from outside. The
+    accept/reject/quality-gate/backfill DECISION logic itself is
+    unchanged and stays on the GUI thread (`_nirc2_field_on_result`) --
+    this class only dispatches `measure_strehl` calls and reads them
+    back in order, exactly what `measure_field`'s own loop does.
+
+    `workers=1` runs the same calls serially, in-process, no pool --
+    bit-identical to before this class existed."""
+    target_result = Signal(object, int)   # (Nirc2StrehlResult, k, 1-indexed)
+    finished_all = Signal()
+    failed = Signal(str)
+
+    def __init__(self, image, params, dl_psf, measure_kw, positions,
+                workers, parent=None):
+        super().__init__(parent)
+        self.image, self.params, self.dl_psf = image, params, dl_psf
+        self.measure_kw = dict(measure_kw)
+        self.positions = [tuple(p) for p in positions]
+        self.workers = workers
+        self._stop = threading.Event()
+
+    def request_stop(self):
+        """Cancel (PLAN section 4): checked between targets, i.e. the
+        loop below finishes whichever target it is currently reading
+        back before honouring this -- "Cancel stops within one target"."""
+        self._stop.set()
+
+    def run(self):
+        from ..image_strehl import measure_strehl
+        from ..parallel import MeasureBatch
+        batch = None
+        try:
+            if self.workers and self.workers > 1 and self.positions:
+                batch = MeasureBatch(self.image, self.params, self.dl_psf,
+                                     self.measure_kw, self.positions,
+                                     self.workers)
+            for k, pos in enumerate(self.positions, start=1):
+                if self._stop.is_set():
+                    break
+                if batch is None:
+                    r = measure_strehl(self.image, params=self.params,
+                                       pos=pos, dl_psf=self.dl_psf,
+                                       **self.measure_kw)
+                else:
+                    r = batch.result(k - 1)
+                self.target_result.emit(r, k)
+        except Exception as e:
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        finally:
+            if batch is not None:
+                # MeasureBatch.close(): cancels every not-yet-read future
+                # and drains the rest -- the executor.shutdown(cancel_
+                # futures=True) PLAN section 4 asks for, at the one
+                # granularity the engine actually exposes (a batch, not
+                # the whole persistent pool, which outlives this call).
+                batch.close()
+        self.finished_all.emit()

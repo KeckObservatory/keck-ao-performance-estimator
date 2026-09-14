@@ -176,7 +176,7 @@ def main():
     win.n2_add_star.setChecked(False)
     win.n2_nstars.setValue(6)
     win._on_nirc2_measure_field()
-    pump(lambda: win.n2_field_btn.isEnabled())
+    pump(lambda: not win._n2_field_busy)
     log = win.n2_log.toPlainText()
     assert "[psf-clean] field ePSF:" in log, log
     assert "tag='strict'" in log and "converged=True" in log, log
