@@ -627,9 +627,31 @@ def _preparse(argv):
     return out
 
 
+def _ensure_utf8_console():
+    """PR-OPEN-4: on a Windows console using the legacy cp1252 code page,
+    printing certain glyphs this tool prints in its normal output (e.g.
+    theta-zero/d-zero as `θ₀`/`d₀`, an em dash) raises
+    `UnicodeEncodeError` and the run dies before it finishes. This
+    reconfigures `stdout`/`stderr` to UTF-8 with `errors="replace"` --
+    same glyphs, just an encoding that can actually emit them, or (for
+    a console font that still can't render one) a replacement character
+    instead of a crash. No output TEXT changes. A no-op wherever the
+    stream is already UTF-8 (Linux/macOS) or does not support
+    `reconfigure` (e.g. captured by a test harness)."""
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass  # not a reconfigurable text stream; leave it alone
+
+
 def _cli():
     """Zero-argument console entry point (see pyproject [project.scripts])."""
     import sys
+    _ensure_utf8_console()
     main(build_parser().parse_args(_preparse(sys.argv[1:])))
 
 
