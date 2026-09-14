@@ -1356,7 +1356,15 @@ class Nirc2StrehlTabMixin:
         for the initial per-target pass and, when field-consistency drops
         outliers with map slots and candidates left, to backfill from the
         remaining not-yet-tried positions (same behaviour as the old
-        per-tick design's own backfill)."""
+        per-tick design's own backfill).
+
+        Resets `_n2_field_late_result_guard` (PR-CP3 acceptance, Opus
+        2026-09-13, B3) for BOTH entry points: a backfill round is a
+        genuine continuation and must resume processing results
+        normally, not stay latched from whatever earlier auto-stop
+        (target reached / quality gate) triggered the field-consistency
+        pass that led here."""
+        self._n2_field_late_result_guard = False
         photrad, bgin, bgout, peakrad = self._n2_field_measure_radii
         measure_kw = dict(
             background_subtracted=self._n2_bg_used,
@@ -1407,8 +1415,21 @@ class Nirc2StrehlTabMixin:
         the decision/UI logic the old `_nirc2_field_tick` applied after
         each measurement, unchanged, just triggered by a signal from
         `FieldMeasureWorker` instead of by a `QTimer` chain reading from
-        a GUI-thread-blocking call."""
-        if self._n2_field_cancel_requested or self._nirc2_field_worker_stale():
+        a GUI-thread-blocking call.
+
+        PR-CP3 acceptance (Opus, 2026-09-13, B3): `request_stop()` (both
+        call sites below) only sets a flag `FieldMeasureWorker.run`
+        checks BETWEEN targets -- with `MeasureBatch` the pool has
+        already computed and queued results for targets requested
+        before that check, so late results still arrive here after this
+        tab has decided to stop. `_n2_field_late_result_guard` (distinct
+        from `_n2_field_cancel_requested`: this is an AUTO-stop, not a
+        user Cancel, and must not change the finish summary's wording)
+        drops them at the top, before they touch `tried`, the log, or
+        the map -- same idiom already used for cancel. Reset once per
+        run in `_nirc2_field_start_measurer` (covers backfill too)."""
+        if (self._n2_field_cancel_requested or self._n2_field_late_result_guard
+                or self._nirc2_field_worker_stale()):
             return   # a couple of already-in-flight results may still land
         kept = len(self._n2_field)
         self._n2_field_tried += 1
@@ -1423,6 +1444,7 @@ class Nirc2StrehlTabMixin:
             verdict = (f"quality gate — ±{r.sr_err:.3f} SR noise "
                        f"(limit ±{engine.SR_ERR_MAX})")
             if self._n2_field_poor >= 2:
+                self._n2_field_late_result_guard = True  # B3: drop late arrivals
                 self._n2_field_measurer.request_stop()  # fainter ones only get worse
         elif verdict is None:
             self._n2_field_poor = 0
@@ -1474,6 +1496,7 @@ class Nirc2StrehlTabMixin:
         else:
             self.n2_log.appendPlainText(f"  star {k}: rejected — {verdict}")
         if len(self._n2_field) >= self._n2_field_target:
+            self._n2_field_late_result_guard = True  # B3: drop late arrivals
             self._n2_field_measurer.request_stop()
 
     def _nirc2_field_measure_failed(self, message):
