@@ -17,6 +17,9 @@ design block D.2 / D.5, PR-D10).
   and a worker unpickles that state once per call into READ-ONLY views, so an
   in-place write in a worker raises instead of corrupting what every other
   task reads.
+- Worker count (design block D.7, PR-D4): `workers=None` means
+  $KECK_AO_WORKERS if set, else `min(8, max(1, os.cpu_count() // 2))`;
+  more than WORKER_CAP = 8 is refused unless $KECK_AO_WORKERS_UNCAPPED=1.
 - Every result is produced by the SAME serial function on the SAME inputs and
   callers reassemble results in submission order, so `workers > 1` returns
   exactly what `workers = 1` returns.  Asserted, not assumed:
@@ -37,10 +40,42 @@ from multiprocessing import shared_memory
 import numpy as np
 
 SHARE_MIN_BYTES = 1 << 16
+WORKER_CAP = 8          # PR-D4: 32 workers on full frames exhausted memory on the rig
+ENV_WORKERS = "KECK_AO_WORKERS"
+ENV_UNCAPPED = "KECK_AO_WORKERS_UNCAPPED"
 
 _LOCK = threading.Lock()
 _POOL = None
 _POOL_WORKERS = 0
+
+
+# ---------------------------------------------------------- worker count
+
+def default_workers():
+    """`min(8, max(1, os.cpu_count() // 2))` (PLAN T4, D.7): 8 on the
+    32-thread rig, 6 on the 12-vCPU Linux box."""
+    return min(WORKER_CAP, max(1, (os.cpu_count() or 2) // 2))
+
+
+def resolve_workers(workers=None):
+    """The worker count a call will use.
+
+    `workers=None` -> $KECK_AO_WORKERS if set, else `default_workers()`; an
+    explicit count wins over the environment.  Below 1 is an error; above
+    WORKER_CAP is an error unless $KECK_AO_WORKERS_UNCAPPED=1 (PR-D4), and the
+    refusal names both the cap and the variable."""
+    if workers is None:
+        env = os.environ.get(ENV_WORKERS, "").strip()
+        workers = int(env) if env else default_workers()
+    workers = int(workers)
+    if workers < 1:
+        raise ValueError(f"workers must be >= 1 (got {workers})")
+    if workers > WORKER_CAP and os.environ.get(ENV_UNCAPPED) != "1":
+        raise ValueError(
+            f"workers={workers} exceeds the cap of {WORKER_CAP} (parallel PR-D4: 32 "
+            f"workers on full frames exhausted memory on the rig); set "
+            f"{ENV_UNCAPPED}=1 to override deliberately")
+    return workers
 
 
 # ------------------------------------------------------------------ pool
@@ -52,9 +87,10 @@ def _ping(delay):
 
 def get_pool(workers):
     """This process's persistent pool of `workers` processes (PR-D10),
-    spawned with this process's environment unchanged (PR-D11)."""
+    spawned with this process's environment unchanged (PR-D11).  The count
+    goes through `resolve_workers`, so the cap holds here too."""
     global _POOL, _POOL_WORKERS
-    workers = int(workers)
+    workers = resolve_workers(workers)
     with _LOCK:
         if _POOL is not None and _POOL_WORKERS == workers:
             return _POOL

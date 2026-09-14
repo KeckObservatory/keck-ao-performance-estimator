@@ -279,7 +279,9 @@ def solve_field(work, params, epsf, catalog=None, *, max_sweeps=5,
     bin_px = 1000.0 / float(epsf.plate_scale_mas)
     keys, models, by_key = [], [], {}
     group_of = np.zeros(n, dtype=int)
-    if int(workers) > 1:
+    from .parallel import resolve_workers
+    workers = resolve_workers(workers)
+    if workers > 1:
         # parallel D.2: the distinct group models rendered in the process
         # pool -- the same _model_at on the same inputs, so the loop below
         # finds each one already present and the solution is unchanged

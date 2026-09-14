@@ -1190,7 +1190,11 @@ def measure_field(image, params, positions=None, n_stars=5,
     `measure_strehl` calls, and the field solution's group models, in the
     process's persistent pool (`keck_ao_estimator.parallel`) and reads them
     back in order, so the returned list is identical to `workers=1`, the
-    default."""
+    default.  `workers=None` takes $KECK_AO_WORKERS, else
+    `min(8, cpu_count // 2)`; more than 8 is refused unless
+    $KECK_AO_WORKERS_UNCAPPED=1 (parallel D.7, PR-D4)."""
+    from .parallel import resolve_workers
+    workers = resolve_workers(workers)
     photrad_as = measure_kw.get("photometry_radius_arcsec",
                                 NIRC2_PHOTOMETRY_RADIUS_ARCSEC)
     if exclude_px is None:

@@ -24,6 +24,10 @@ here that compares the new code path against the old one, bit for bit.
       scope through `measure_strehl`, footprint scope directly, OPEN-8's
       near-singular SEED+34 targets included) identical to the pre-PR-D12
       code patched back in as the reference.
+  (e) D.7 / PR-D4  worker count: `workers=None` -> min(8, cpu_count // 2),
+      KECK_AO_WORKERS, an explicit count winning, < 1 and > 8 refused
+      (naming KECK_AO_WORKERS_UNCAPPED) in resolve_workers, get_pool and
+      measure_field, and the override allowing it.
 
 Default run is the CI-wired subset; --full adds frames. Needs no network
 and no proprietary data: the bundled example frame, the packaged K2
@@ -398,6 +402,76 @@ def frame_sky_checks(full=False):
           f"{different[:3]}; {t_new:.1f} s vs {t_old:.1f} s pre-PR-D12")
 
 
+# ------------------------------------------------ (e) D.7 worker count
+
+def _with_env(**env):
+    """Context manager: set/unset environment variables for one check."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def cm():
+        saved = {k: os.environ.get(k) for k in env}
+        try:
+            for k, v in env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            yield
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    return cm()
+
+
+def _refusal(fn):
+    try:
+        fn()
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def cap_guard_checks(full=False):
+    print("parallel (e) -- worker count: default, KECK_AO_WORKERS, the cap of 8 and "
+          "its override (D.7, PR-D4; T4):")
+    import keck_ao_estimator.parallel as par
+
+    cpu = os.cpu_count() or 2
+    expect = min(8, max(1, cpu // 2))
+    with _with_env(KECK_AO_WORKERS=None, KECK_AO_WORKERS_UNCAPPED=None):
+        check("(e) workers=None -> min(8, max(1, cpu_count // 2))",
+              par.resolve_workers(None) == expect == par.default_workers(),
+              f"cpu_count {cpu} -> {par.resolve_workers(None)}")
+        check("(e) an explicit count is used as given", par.resolve_workers(3) == 3)
+        msg0 = _refusal(lambda: par.resolve_workers(0))
+        check("(e) workers < 1 refused", msg0 is not None, repr(msg0))
+        msg9 = _refusal(lambda: par.resolve_workers(9))
+        check("(e) workers=9 refused, naming the cap and the override variable",
+              msg9 is not None and "8" in msg9 and "KECK_AO_WORKERS_UNCAPPED" in msg9,
+              repr(msg9))
+        msg_pool = _refusal(lambda: par.get_pool(9))
+        check("(e) get_pool(9) refused before any process starts",
+              msg_pool is not None and par._POOL_WORKERS != 9, repr(msg_pool))
+        msg_mf = _refusal(lambda: engine.measure_field(
+            np.zeros((64, 64)), synth.synth_params(), positions=[(32, 32)], workers=9))
+        check("(e) measure_field(workers=9) refused up front", msg_mf is not None,
+              repr(msg_mf))
+    with _with_env(KECK_AO_WORKERS="3", KECK_AO_WORKERS_UNCAPPED=None):
+        check("(e) KECK_AO_WORKERS=3 sets the default", par.resolve_workers(None) == 3)
+        check("(e) an explicit count wins over KECK_AO_WORKERS",
+              par.resolve_workers(2) == 2)
+    with _with_env(KECK_AO_WORKERS="12", KECK_AO_WORKERS_UNCAPPED=None):
+        check("(e) KECK_AO_WORKERS=12 is capped like an argument",
+              _refusal(lambda: par.resolve_workers(None)) is not None)
+    with _with_env(KECK_AO_WORKERS=None, KECK_AO_WORKERS_UNCAPPED="1"):
+        check("(e) KECK_AO_WORKERS_UNCAPPED=1 allows 9 (no pool started)",
+              par.resolve_workers(9) == 9)
+
+
 # ------------------------------------------------------------------- main
 
 def main():
@@ -408,7 +482,8 @@ def main():
     for name, fn in (("(a)", lambda: blank_disc_checks(args.full)),
                      ("(b)", lambda: cache_install_checks(args.full)),
                      ("(c)", lambda: workers_checks(args.full)),
-                     ("(d)", lambda: frame_sky_checks(args.full))):
+                     ("(d)", lambda: frame_sky_checks(args.full)),
+                     ("(e)", lambda: cap_guard_checks(args.full))):
         t0 = time.time()
         fn()
         print(f"  ({name} section: {time.time() - t0:.1f}s)\n")
