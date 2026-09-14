@@ -45,9 +45,14 @@ import numpy as np
 
 import keck_ao_estimator as engine
 import psf_fit_synth as synth
+from parallel_map import pmap
 
 FAILURES = []
 DATA_DIR = os.path.join(HERE, "data")
+# --workers (parallel T3): the frame loops run side by side in a process pool;
+# every task returns what the serial loop computed and the output is assembled
+# in the serial order, so everything printed and written is identical to 1
+WORKERS = 1
 
 
 def check(name, cond, detail=""):
@@ -132,70 +137,105 @@ def _build_s2_epsf(params, flat, sr, halo_beta):
     return engine.build_epsf(work, params)
 
 
-def _s2_bias_rows(params, flat, frames):
+def _s2_key(spec):
+    """The (sr, halo_beta) ePSF key of an S2 frame spec, as that frame's truth
+    records it (`sr_contrast_group.sr`, `halo.beta`); `_s2_frame_rows`
+    asserts the two agree."""
+    _case, sr, _contrast, _seps, _seed, halo_beta, _kw = spec
+    return (float(sr), float(engine.MOFFAT_BETA_KOLM if halo_beta is None
+                             else halo_beta))
+
+
+def _s2_epsf_item(state, key):
+    """(ePSF, None) for one (sr, halo_beta), or (None, reason) when the
+    engine does not implement it."""
+    try:
+        return _build_s2_epsf(state["params"], state["flat"], key[0], key[1]), None
+    except NotImplementedError as e:
+        return None, str(e)
+
+
+def _s2_bias_rows(params, flat, specs):
     """One row per (frame, pair): default-path bias always; psf_clean
     bias via the WP-2b donor-frame ePSF (one build per (sr, halo_beta),
     reused for every pair sharing it) when the engine supports it, else
     None with one [skip] line. Returns (rows, clean_skip_reason,
     epsf_reports) -- epsf_reports maps (sr, halo_beta) -> the ePSF's
     tag/delta/converged/phase_coverage, for the table header (WP-2b:
-    "the reader knows what model produced the surface")."""
-    rows = []
-    epsf_cache = {}
-    epsf_reports = {}
-    clean_skip_reason = None
-    for raw, truth in frames:
-        if truth["case"] not in ("S2", "S2_broadwing"):
-            continue
-        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
-        group = truth["sr_contrast_group"]
-        sr = group["sr"]
-        beta = truth["halo"]["beta"]
-        key = (sr, beta)
+    "the reader knows what model produced the surface").
 
-        if key not in epsf_cache:
+    `specs` are `synth.s2_frame_specs()`: each frame is built where it is
+    measured.  --workers > 1 (parallel T3) builds the ePSFs, then the
+    frames' rows, side by side; every result is the same function of the
+    same inputs and is read back in order, so the rows are those of the
+    serial run (and, since PR-D9, an ePSF's cached models do not depend on
+    which frame asked first)."""
+    todo = [i for i, spec in enumerate(specs) if spec[0] in ("S2", "S2_broadwing")]
+    keys = list(dict.fromkeys(_s2_key(specs[i]) for i in todo))
+    built = pmap(_s2_epsf_item, keys, WORKERS, shared={"params": params, "flat": flat})
+    epsf_cache, epsf_reports, clean_skip_reason = {}, {}, None
+    for key, (epsf, reason) in zip(keys, built):
+        # as the serial loop did: nothing is used after the first refusal
+        if clean_skip_reason is None and reason is not None:
+            clean_skip_reason = reason
+        if clean_skip_reason is not None:
             epsf = None
-            if clean_skip_reason is None:
-                try:
-                    epsf = _build_s2_epsf(params, flat, sr, beta)
-                    epsf_reports[key] = {
-                        "tag": epsf.tag, "delta": epsf.delta,
-                        "converged": epsf.converged,
-                        "phase_coverage": epsf.phase_coverage,
-                    }
-                except NotImplementedError as e:
-                    clean_skip_reason = str(e)
-            epsf_cache[key] = epsf
-        epsf = epsf_cache[key]
-        cat = engine.deep_star_catalog(work, params) if epsf is not None else None
-
-        for pair in truth["pairs"]:
-            tstar = truth["stars"][pair["target_id"]]
-            pos = (tstar["x"], tstar["y"])
-            r_def = engine.measure_strehl(work, params=params, pos=pos)
-            row = {
-                "sr": sr, "halo_beta": beta,
-                "contrast_mag": group["contrast_mag"],
-                "sep_arcsec": pair["sep_arcsec"],
-                "bias_default": (r_def.strehl - truth["sr_truth_isolated"])
-                if r_def.ok else None,
-                "bias_psf_clean": None,
-                "epsf_tag": epsf.tag if epsf is not None else "",
-                "refusal_note": "",
+        else:
+            epsf_reports[key] = {
+                "tag": epsf.tag, "delta": epsf.delta,
+                "converged": epsf.converged,
+                "phase_coverage": epsf.phase_coverage,
             }
-            if epsf is not None:
-                cleaned, report = engine.clean_star(work, pos, params, epsf,
-                                                    catalog=cat)
-                if report.cleaned:
-                    r_clean = engine.measure_strehl(cleaned, params=params,
-                                                     pos=pos)
-                    row["bias_psf_clean"] = (
-                        r_clean.strehl - truth["sr_truth_isolated"]
-                        if r_clean.ok else None)
-                else:
-                    row["refusal_note"] = report.note
-            rows.append(row)
+        epsf_cache[key] = epsf
+    state = {"specs": specs, "params": params, "flat": flat, "epsf": epsf_cache}
+    rows = [row for frame_rows in pmap(_s2_frame_rows, todo, WORKERS, shared=state)
+            for row in frame_rows]
     return rows, clean_skip_reason, epsf_reports
+
+
+def _s2_frame_rows(state, i):
+    """The S2 rows of frame `i`: default-path bias always, psf_clean bias via
+    that frame's (sr, halo_beta) donor-frame ePSF when one was built."""
+    params, flat = state["params"], state["flat"]
+    raw, truth = synth.build_s2_frame(params, state["specs"][i])
+    work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+    group = truth["sr_contrast_group"]
+    sr = group["sr"]
+    beta = truth["halo"]["beta"]
+    if (sr, beta) != _s2_key(state["specs"][i]):
+        raise AssertionError(f"S2 frame {i}: truth key {(sr, beta)} != spec key "
+                             f"{_s2_key(state['specs'][i])}")
+    epsf = state["epsf"][(sr, beta)]
+    cat = engine.deep_star_catalog(work, params) if epsf is not None else None
+
+    rows = []
+    for pair in truth["pairs"]:
+        tstar = truth["stars"][pair["target_id"]]
+        pos = (tstar["x"], tstar["y"])
+        r_def = engine.measure_strehl(work, params=params, pos=pos)
+        row = {
+            "sr": sr, "halo_beta": beta,
+            "contrast_mag": group["contrast_mag"],
+            "sep_arcsec": pair["sep_arcsec"],
+            "bias_default": (r_def.strehl - truth["sr_truth_isolated"])
+            if r_def.ok else None,
+            "bias_psf_clean": None,
+            "epsf_tag": epsf.tag if epsf is not None else "",
+            "refusal_note": "",
+        }
+        if epsf is not None:
+            cleaned, report = engine.clean_star(work, pos, params, epsf,
+                                                catalog=cat)
+            if report.cleaned:
+                r_clean = engine.measure_strehl(cleaned, params=params,
+                                                 pos=pos)
+                row["bias_psf_clean"] = (
+                    r_clean.strehl - truth["sr_truth_isolated"]
+                    if r_clean.ok else None)
+            else:
+                row["refusal_note"] = report.note
+        rows.append(row)
+    return rows
 
 
 def _write_s2_csv(path, rows):
@@ -262,8 +302,8 @@ def s2_checks():
     t0 = time.time()
     params = synth.synth_params()
     flat = engine.load_nirc2_calibration()[0]
-    frames = synth.build_s2(params)
-    rows, clean_skip_reason, epsf_reports = _s2_bias_rows(params, flat, frames)
+    rows, clean_skip_reason, epsf_reports = _s2_bias_rows(
+        params, flat, synth.s2_frame_specs())
 
     csv_path = os.path.join(DATA_DIR, "psf_fit_s2_bias.csv")
     _write_s2_csv(csv_path, rows)
@@ -291,16 +331,21 @@ def s3_checks():
     sr_truth = truth["sr_truth_isolated"]
 
     results = {}
-    for name, kw in (("default", {}), ("robust_sky", {"robust_sky": True})):
+    # --workers (parallel T3): each target's measurement is a task; the
+    # aggregation below runs here, in target order, exactly as before
+    state = {"params": params, "reduced": reduced, "truth": truth}
+    measured = dict(zip(
+        [(p, tid) for p in ("default", "robust_sky") for tid in target_ids],
+        pmap(_s3_target, [(p, tid) for p in ("default", "robust_sky")
+                          for tid in target_ids], WORKERS, shared=state)))
+    for name in ("default", "robust_sky"):
         biases, n_crowded = [], 0
         for tid in target_ids:
-            star = truth["stars"][tid]
-            r = engine.measure_strehl(reduced, params=params,
-                                      pos=(star["x"], star["y"]), **kw)
-            if not r.ok:
+            ok, strehl, crowded = measured[(name, tid)]
+            if not ok:
                 continue
-            biases.append(r.strehl - sr_truth)
-            if r.crowded:
+            biases.append(strehl - sr_truth)
+            if crowded:
                 n_crowded += 1
         n = len(biases)
         med = float(np.median(biases)) if n else float("nan")
@@ -324,18 +369,17 @@ def s3_checks():
               f"converged={epsf.converged} "
               f"phase_coverage={epsf.phase_coverage:.3f}")
         cat = engine.deep_star_catalog(work, params)
+        state_c = dict(state, work=work, epsf=epsf, cat=cat)
+        measured = dict(zip(target_ids, pmap(
+            _s3_target, [("psf_clean", tid) for tid in target_ids], WORKERS,
+            shared=state_c)))
         biases, n_crowded = [], 0
         for tid in target_ids:
-            star = truth["stars"][tid]
-            pos = (star["x"], star["y"])
-            cleaned, report = engine.clean_star(work, pos, params, epsf,
-                                                catalog=cat)
-            r = engine.measure_strehl(
-                cleaned if report.cleaned else work, params=params, pos=pos)
-            if not r.ok:
+            ok, strehl, crowded = measured[tid]
+            if not ok:
                 continue
-            biases.append(r.strehl - sr_truth)
-            if r.crowded:
+            biases.append(strehl - sr_truth)
+            if crowded:
                 n_crowded += 1
         n = len(biases)
         med = float(np.median(biases)) if n else float("nan")
@@ -355,7 +399,56 @@ def s3_checks():
     return results
 
 
+def _s3_target(state, item):
+    """One S3 target on one path -> (ok, strehl, crowded), measured exactly
+    as the serial loop measures it."""
+    path, tid = item
+    params = state["params"]
+    star = state["truth"]["stars"][tid]
+    pos = (star["x"], star["y"])
+    if path == "psf_clean":
+        work = state["work"]
+        cleaned, report = engine.clean_star(work, pos, params, state["epsf"],
+                                            catalog=state["cat"])
+        r = engine.measure_strehl(
+            cleaned if report.cleaned else work, params=params, pos=pos)
+    else:
+        kw = {"robust_sky": True} if path == "robust_sky" else {}
+        r = engine.measure_strehl(state["reduced"], params=params, pos=pos, **kw)
+    return r.ok, r.strehl, r.crowded
+
+
 # --------------------------------------------------------------------- S5
+
+def _s5_moderate_draw(k):
+    """S5-moderate draw k (seed SEED + k): -> ("built", cleaned biases,
+    robust_sky biases), ("unusable", [], []) or ("skip:<reason>", [], []),
+    measured exactly as the serial loop measures it."""
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + k, n_noise=1))[0]
+    reduced = engine.reduce_frame(raw, flat=flat)
+    work = engine.sigma_filter3(reduced)
+    sr_truth = truth["sr_truth_isolated"]
+    try:
+        epsf = engine.build_epsf(work, params)
+    except NotImplementedError as e:
+        return "skip:" + str(e), [], []
+    if not epsf.usable:
+        return "unusable", [], []
+    cat = engine.deep_star_catalog(work, params)
+    clean_biases, robust_biases = [], []
+    for tid in truth["target_ids"]:
+        s = truth["stars"][tid]
+        pos = (s["x"], s["y"])
+        r = engine.measure_strehl(work, params=params, pos=pos,
+                                  psf_clean=True, robust_sky=True,
+                                  epsf=epsf, star_catalog=cat)
+        if r.ok and r.cleaned:
+            clean_biases.append(r.strehl - sr_truth)
+            robust_biases.append(r.strehl_uncleaned - sr_truth)
+    return "built", clean_biases, robust_biases
+
 
 def s5_checks(full=False):
     """PLAN section 10.3 / WP-5 handoff (STATUS.md, Lane A -> Lane C,
@@ -441,29 +534,20 @@ def s5_checks(full=False):
     t0 = time.time()
     clean_biases, robust_biases = [], []
     n_builds, n_fields, skip_reason = 0, 0, None
-    for raw, truth in synth.build_s5_moderate(params, n_noise=N_SEEDS_MODERATE):
+    # --workers (parallel T3): draw k of build_s5_moderate(n_noise=12) is
+    # build_s5_moderate(seed=SEED + k) -- its own loop seeds each draw with
+    # seed + k -- so each draw is a task; the tallies run here, in draw order
+    for outcome, draw_clean, draw_robust in pmap(
+            _s5_moderate_draw, range(N_SEEDS_MODERATE), WORKERS):
         n_fields += 1
-        reduced = engine.reduce_frame(raw, flat=flat)
-        work = engine.sigma_filter3(reduced)
-        sr_truth = truth["sr_truth_isolated"]
-        try:
-            epsf = engine.build_epsf(work, params)
-        except NotImplementedError as e:
-            skip_reason = str(e)
+        if outcome.startswith("skip:"):
+            skip_reason = outcome[len("skip:"):]
             break
-        if not epsf.usable:
+        if outcome == "unusable":
             continue
         n_builds += 1
-        cat = engine.deep_star_catalog(work, params)
-        for tid in truth["target_ids"]:
-            s = truth["stars"][tid]
-            pos = (s["x"], s["y"])
-            r = engine.measure_strehl(work, params=params, pos=pos,
-                                      psf_clean=True, robust_sky=True,
-                                      epsf=epsf, star_catalog=cat)
-            if r.ok and r.cleaned:
-                clean_biases.append(r.strehl - sr_truth)
-                robust_biases.append(r.strehl_uncleaned - sr_truth)
+        clean_biases.extend(draw_clean)
+        robust_biases.extend(draw_robust)
     if skip_reason is not None:
         skip("S5 moderate: D44/D47 criterion", skip_reason)
     else:
@@ -619,6 +703,66 @@ def s6_checks():
 
 # --------------------------------------------------------------------- S4
 
+def _report(kind, name, value, detail=""):
+    """Emit a task's outcome through this process's check()/skip()."""
+    if kind == "skip":
+        skip(name, value)
+    else:
+        check(name, value, detail)
+
+
+_S4_FRAMES = {}     # per process: build_s4_ladder / build_s4_wide, built once
+
+
+def _s4_frames(kind):
+    if kind not in _S4_FRAMES:
+        params = synth.synth_params()
+        _S4_FRAMES[kind] = (synth.build_s4_ladder(params) if kind == "ladder"
+                            else synth.build_s4_wide(params))
+    return _S4_FRAMES[kind]
+
+
+def _s4_item(item):
+    """One S4 frame -> (kind, name, cond or skip reason, detail), with the
+    names and details the serial loops print."""
+    params = synth.synth_params()
+    flat = engine.load_nirc2_calibration()[0]
+    if item[0] == "ladder":
+        raw, truth = _s4_frames("ladder")[item[1]]
+        expected = truth["expected_epsf_tag"]
+        name = f"S4d ladder tag == {expected}"
+        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+        try:
+            epsf = engine.build_epsf(work, params)
+        except NotImplementedError as e:
+            return "skip", name, str(e), ""
+        return ("check", name, epsf.tag == expected,
+                f"got {epsf.tag!r}, note={epsf.note!r}")
+    if item[0] == "donor":
+        sr = item[1]
+        name = f"WP-1d: S2 donor frame usable/strict at sr={sr}"
+        raw_d, truth_d = synth.build_s2_donor_frame(params, sr)
+        work_d = engine.sigma_filter3(engine.reduce_frame(raw_d, flat=flat))
+        try:
+            epsf_d = engine.build_epsf(work_d, params)
+        except NotImplementedError as e:
+            return "skip", name, str(e), ""
+        return ("check", name, epsf_d.usable and epsf_d.tag == "strict",
+                f"usable={epsf_d.usable} tag={epsf_d.tag!r} "
+                f"window={truth_d['donor_peak_window_adu']} note={epsf_d.note!r}")
+    _kind, i, oversample = item
+    raw_w, truth_w = _s4_frames("wide")[i]
+    contrast = truth_w["sr_contrast_group"]["contrast_mag"]
+    name = f"WP-1d: S4c wide usable, contrast={contrast} oversample={oversample}"
+    wide_params = synth._derive_params(params, camname="wide")
+    work_w = engine.sigma_filter3(engine.reduce_frame(raw_w, flat=flat))
+    try:
+        epsf_w = engine.build_epsf(work_w, wide_params, oversample=oversample)
+    except NotImplementedError as e:
+        return "skip", name, str(e), ""
+    return "check", name, epsf_w.usable, f"tag={epsf_w.tag!r} note={epsf_w.note!r}"
+
+
 def s4_checks(full=False):
     print("S4 -- hygiene:")
     params = synth.synth_params()
@@ -637,32 +781,13 @@ def s4_checks(full=False):
           f"with-flat={r_f.strehl:.4f} without-flat={r_nf.strehl:.4f} d={d:.4f}")
 
     # --- S4d donor ladder: needs build_epsf (engine-dependent)
-    for raw, truth in synth.build_s4_ladder(params):
-        expected = truth["expected_epsf_tag"]
-        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
-        try:
-            epsf = engine.build_epsf(work, params)
-        except NotImplementedError as e:
-            skip(f"S4d ladder tag == {expected}", str(e))
-            continue
-        check(f"S4d ladder tag == {expected}", epsf.tag == expected,
-              f"got {epsf.tag!r}, note={epsf.note!r}")
-
     # --- WP-1d AC1: S2 donor frame builds usable=True, tag=strict at
     # EACH sr -- cheap (9-star build_epsf per sr), so CI-wired like S4d
     # rather than gated behind --full.
-    for sr in (0.15, 0.30, 0.60):
-        raw_d, truth_d = synth.build_s2_donor_frame(params, sr)
-        work_d = engine.sigma_filter3(engine.reduce_frame(raw_d, flat=flat))
-        try:
-            epsf_d = engine.build_epsf(work_d, params)
-        except NotImplementedError as e:
-            skip(f"WP-1d: S2 donor frame usable/strict at sr={sr}", str(e))
-            continue
-        check(f"WP-1d: S2 donor frame usable/strict at sr={sr}",
-              epsf_d.usable and epsf_d.tag == "strict",
-              f"usable={epsf_d.usable} tag={epsf_d.tag!r} "
-              f"window={truth_d['donor_peak_window_adu']} note={epsf_d.note!r}")
+    # --workers (parallel T3): each frame is a task; results reported in order
+    items = [("ladder", i) for i in range(3)] + [("donor", sr) for sr in (0.15, 0.30, 0.60)]
+    for outcome in pmap(_s4_item, items, WORKERS):
+        _report(*outcome)
 
     if not full:
         return
@@ -683,21 +808,11 @@ def s4_checks(full=False):
     # epsf_strehl accuracy? -- still isn't specified (WP-2 handoff: "I
     # own the assertions"), so tag/delta/etc are printed as [info] for
     # Opus to judge, same deliberate slot as before.
-    wide_params = synth._derive_params(params, camname="wide")
-    for raw_w, truth_w in synth.build_s4_wide(params):
-        contrast = truth_w["sr_contrast_group"]["contrast_mag"]
-        work_w = engine.sigma_filter3(engine.reduce_frame(raw_w, flat=flat))
-        for oversample in (2, 4):
-            try:
-                epsf_w = engine.build_epsf(work_w, wide_params,
-                                          oversample=oversample)
-            except NotImplementedError as e:
-                skip(f"WP-1d: S4c wide usable, contrast={contrast} "
-                     f"oversample={oversample}", str(e))
-                continue
-            check(f"WP-1d: S4c wide usable, contrast={contrast} "
-                  f"oversample={oversample}", epsf_w.usable,
-                  f"tag={epsf_w.tag!r} note={epsf_w.note!r}")
+    # --workers (parallel T3): each (frame, oversample) is a task, reported
+    # in the serial order (build_s4_wide's two default contrasts, 0 and 2)
+    items = [("wide", i, oversample) for i in range(2) for oversample in (2, 4)]
+    for outcome in pmap(_s4_item, items, WORKERS):
+        _report(*outcome)
 
 
 # ------------------------------------------------------------------ OPEN-8
@@ -725,63 +840,71 @@ def open8_checks():
     bin centre and the order no longer changes it (the replay is kept, and
     still refuses both targets)."""
     print("OPEN-8 -- unphysical cleaned result is refused:")
+    # --workers (parallel T3): each frame is a task; its checks are reported
+    # here, in the serial order
+    items = [(34, (1, 6), False), (23, (21,), False),
+             (444, (21,), True), (486, (19,), True)]
+    for outcomes in pmap(_open8_frame, items, WORKERS):
+        for outcome in outcomes:
+            _report(*outcome)
+
+
+def _open8_frame(item):
+    """One OPEN-8 frame -> its checks as (kind, name, cond, detail), with the
+    names, details and measurement order of the serial loops."""
+    off, tids, replay = item
     params = synth.synth_params()
     flat = engine.load_nirc2_calibration()[0]
-    for off, tids in ((34, (1, 6)), (23, (21,))):
-        raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + off))[0]
-        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
-        ep = engine.build_epsf(work, params)
-        if not ep.usable:
-            check(f"OPEN-8 SEED+{off}: field ePSF usable", False, ep.note)
-            continue
-        cat = engine.deep_star_catalog(work, params)
+    out = []
+    raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + off))[0]
+    work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
+    ep = engine.build_epsf(work, params)
+    if not ep.usable:
+        return [("check", f"OPEN-8 SEED+{off}: field ePSF usable", False, ep.note)]
+    cat = engine.deep_star_catalog(work, params)
+    if not replay:
         for tid in tids:
             s = truth["stars"][tid]
             pos = (s["x"], s["y"])
             r = engine.measure_strehl(work, params=params, pos=pos, psf_clean=True,
                                       robust_sky=True, epsf=ep, star_catalog=cat)
             r0 = engine.measure_strehl(work, params=params, pos=pos, robust_sky=True)
-            check(f"OPEN-8 SEED+{off} t{tid}: cleaning refused as unphysical",
-                  r.ok and not r.cleaned
-                  and r.psf_clean_note.startswith("cleaning REFUSED: unphysical result"),
-                  f"cleaned={r.cleaned} SR {r.strehl:.4f} note {r.psf_clean_note[:70]!r}")
-            check(f"OPEN-8 SEED+{off} t{tid}: uncleaned number stands "
-                  "(== psf_clean=False, bit-exact)",
-                  r.ok and r0.ok and r.strehl == r0.strehl and r.flux == r0.flux,
-                  f"SR {r.strehl:.6f} vs {r0.strehl:.6f}")
+            out.append(("check", f"OPEN-8 SEED+{off} t{tid}: cleaning refused as unphysical",
+                        r.ok and not r.cleaned
+                        and r.psf_clean_note.startswith("cleaning REFUSED: unphysical result"),
+                        f"cleaned={r.cleaned} SR {r.strehl:.4f} note {r.psf_clean_note[:70]!r}"))
+            out.append(("check", f"OPEN-8 SEED+{off} t{tid}: uncleaned number stands "
+                        "(== psf_clean=False, bit-exact)",
+                        r.ok and r0.ok and r.strehl == r0.strehl and r.flux == r0.flux,
+                        f"SR {r.strehl:.6f} vs {r0.strehl:.6f}"))
+        return out
 
     # FS-OPEN-5: cleaned SR <= 0, replayed in FS-E2's per-target order
-    for off, tid in ((444, 21), (486, 19)):
-        raw, truth = list(synth.build_s5_moderate(params, seed=synth.SEED + off))[0]
-        work = engine.sigma_filter3(engine.reduce_frame(raw, flat=flat))
-        ep = engine.build_epsf(work, params)
-        if not ep.usable:
-            check(f"OPEN-8 SEED+{off}: field ePSF usable", False, ep.note)
-            continue
-        cat = engine.deep_star_catalog(work, params)
-        r = None
-        for t in truth["target_ids"]:
-            s = truth["stars"][t]
-            rt = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
-                                       psf_clean=True, robust_sky=True, epsf=ep,
-                                       star_catalog=cat)
-            if t == tid:
-                r = rt
-                break
-        s = truth["stars"][tid]
-        r0 = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
-                                   robust_sky=True)
-        check(f"OPEN-8 SEED+{off} t{tid}: cleaned SR <= 0 refused as unphysical",
-              r is not None and r.ok and not r.cleaned
-              and r.psf_clean_note.startswith("cleaning REFUSED: unphysical result")
-              and "<= 0" in r.psf_clean_note,
-              f"cleaned={getattr(r, 'cleaned', None)} note "
-              f"{getattr(r, 'psf_clean_note', '')[:70]!r}")
-        check(f"OPEN-8 SEED+{off} t{tid}: uncleaned number stands "
-              "(== psf_clean=False, bit-exact)",
-              r is not None and r.ok and r0.ok and r.strehl == r0.strehl
-              and r.flux == r0.flux,
-              f"SR {getattr(r, 'strehl', float('nan')):.6f} vs {r0.strehl:.6f}")
+    (tid,) = tids
+    r = None
+    for t in truth["target_ids"]:
+        s = truth["stars"][t]
+        rt = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
+                                   psf_clean=True, robust_sky=True, epsf=ep,
+                                   star_catalog=cat)
+        if t == tid:
+            r = rt
+            break
+    s = truth["stars"][tid]
+    r0 = engine.measure_strehl(work, params=params, pos=(s["x"], s["y"]),
+                               robust_sky=True)
+    out.append(("check", f"OPEN-8 SEED+{off} t{tid}: cleaned SR <= 0 refused as unphysical",
+                r is not None and r.ok and not r.cleaned
+                and r.psf_clean_note.startswith("cleaning REFUSED: unphysical result")
+                and "<= 0" in r.psf_clean_note,
+                f"cleaned={getattr(r, 'cleaned', None)} note "
+                f"{getattr(r, 'psf_clean_note', '')[:70]!r}"))
+    out.append(("check", f"OPEN-8 SEED+{off} t{tid}: uncleaned number stands "
+                "(== psf_clean=False, bit-exact)",
+                r is not None and r.ok and r0.ok and r.strehl == r0.strehl
+                and r.flux == r0.flux,
+                f"SR {getattr(r, 'strehl', float('nan')):.6f} vs {r0.strehl:.6f}"))
+    return out
 
 
 # ------------------------------------------------------- FS-OPEN-6 note
@@ -834,7 +957,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--full", action="store_true",
                         help="also run S2/S3 and S4b/S4c (slow, not CI-wired)")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="run the frame loops side by side in a process "
+                             "pool (parallel T3); output identical to 1")
     args = parser.parse_args()
+    global WORKERS
+    WORKERS = args.workers
 
     t_start = time.time()
     for name, fn in (("S1", s1_checks), ("S4", lambda: s4_checks(args.full)),

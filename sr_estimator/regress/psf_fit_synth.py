@@ -54,6 +54,7 @@ from keck_ao_estimator.nirc2 import NIRC2_SATURATION_ADU
 __all__ = [
     "SEED", "S2_SEPARATIONS_ARCSEC", "S2_CONTRASTS_MAG", "S2_SRS",
     "synth_params", "synth_frame", "build_s1", "build_s2",
+    "s2_frame_specs", "build_s2_frame",
     "build_s2_donor_frame", "build_s3", "build_s4",
     "build_s5_sparse", "build_s5_moderate", "build_s5_extreme",
 ]
@@ -521,20 +522,42 @@ def build_s2(params, *, separations=S2_SEPARATIONS_ARCSEC,
     realizations each (same geometry, different noise draw), plus one
     isolated control frame per sr and a 2-frame broad-wing (beta=2.5)
     sensitivity slice at sr=0.30, contrasts {0, 3}."""
-    frames = []
+    return [build_s2_frame(params, spec) for spec in s2_frame_specs(
+        separations=separations, contrasts=contrasts, srs=srs, n_noise=n_noise,
+        **kw)]
+
+
+def s2_frame_specs(*, separations=S2_SEPARATIONS_ARCSEC,
+                   contrasts=S2_CONTRASTS_MAG, srs=S2_SRS, n_noise=3, **kw):
+    """The frames `build_s2` builds, in its order, as picklable specs
+    `(case, sr, contrast_mag, separations, seed, halo_beta, kw)`;
+    `build_s2_frame(params, spec)` builds one.  Every frame depends only on
+    its own spec (its noise comes from its own seed), so the frames can be
+    built one at a time, anywhere (parallel T3)."""
+    specs = []
     for sr in srs:
         for contrast in contrasts:
             for k in range(n_noise):
-                frames.append(_s2_lattice_frame(
-                    params, sr, contrast, separations, seed=SEED + k, **kw))
-        iso_stars = [(512.0, 512.0, 1.0e5, "target")]
-        frames.append(synth_frame(iso_stars, params, sr=sr,
-                                  case="S2_isolated", seed=SEED, **kw))
+                specs.append(("S2", sr, contrast, separations, SEED + k, None, kw))
+        specs.append(("S2_isolated", sr, None, None, SEED, None, kw))
     for contrast in (0, 3):
-        frames.append(_s2_lattice_frame(
-            params, 0.30, contrast, separations, seed=SEED, halo_beta=2.5,
-            case="S2_broadwing", **kw))
-    return frames
+        specs.append(("S2_broadwing", 0.30, contrast, separations, SEED, 2.5, kw))
+    return specs
+
+
+def build_s2_frame(params, spec):
+    """One `build_s2` frame, `(raw, truth)`, from its `s2_frame_specs` spec."""
+    case, sr, contrast, separations, seed, halo_beta, kw = spec
+    if case == "S2_isolated":
+        iso_stars = [(512.0, 512.0, 1.0e5, "target")]
+        return synth_frame(iso_stars, params, sr=sr,
+                           case="S2_isolated", seed=seed, **kw)
+    if case == "S2_broadwing":
+        return _s2_lattice_frame(
+            params, sr, contrast, separations, seed=seed, halo_beta=halo_beta,
+            case="S2_broadwing", **kw)
+    return _s2_lattice_frame(
+        params, sr, contrast, separations, seed=seed, **kw)
 
 
 # -------------------------------------------------------------------- S3
