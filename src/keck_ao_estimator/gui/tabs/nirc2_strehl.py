@@ -401,7 +401,10 @@ class Nirc2StrehlTabMixin:
         self.n2_field_btn = QtWidgets.QPushButton("Measure field")
         self.n2_field_btn.setToolTip(
             "Auto-find the N brightest stars (the Stars spin) in the "
-            "current frame, measure each, and map the results")
+            "current frame, measure each, and map the results. While a "
+            "measurement is running, this same button doubles as "
+            "Cancel -- click it again to stop (takes effect before the "
+            "next stage or target starts, not necessarily instantly)")
         self.n2_field_btn.clicked.connect(self._on_nirc2_measure_field)
         self.n2_add_star = QtWidgets.QPushButton("Add star by click")
         self.n2_add_star.setCheckable(True)
@@ -660,6 +663,15 @@ class Nirc2StrehlTabMixin:
         self._n2_dl = None
         self._n2_imno = None
         self._n2_bg_used = False
+        # parallel PR-CP3 review (Fable, 2026-09-13): the per-target field
+        # map redraw is coalesced onto this single-shot timer instead of
+        # running synchronously inside every `_nirc2_field_on_result` call
+        # -- a burst of results (parallel workers deliver in bursts) gets
+        # at most one redraw, not one per result. See
+        # _nirc2_field_request_redraw.
+        self._n2_field_redraw_timer = QtCore.QTimer(self)
+        self._n2_field_redraw_timer.setSingleShot(True)
+        self._n2_field_redraw_timer.timeout.connect(self._nirc2_draw_map)
         return w
 
     # ---- handlers ----------------------------------------------------------
@@ -1345,6 +1357,29 @@ class Nirc2StrehlTabMixin:
         m.failed.connect(self._nirc2_field_measure_failed)
         m.start()
 
+    def _nirc2_field_request_redraw(self):
+        """Coalesce the per-target field-map redraw (Fable's PR-CP3
+        review, 2026-09-13): decisive experiment showed the worst 50 ms
+        paint gap during "Measure field" (110-470 ms) was NOT the
+        engine holding the GIL -- with `_nirc2_field_on_result` made a
+        no-op, the worst gap dropped to ~72-84 ms at both workers=1 and
+        workers=8. The actual cost was this handler's own bookkeeping
+        plus a synchronous `_nirc2_draw_map()` on EVERY target, with
+        parallel workers occasionally delivering two results back to
+        back inside one 50 ms tick. Fix: schedule the redraw on a
+        single-shot ~100 ms timer instead of drawing synchronously here;
+        a burst of results arriving while it is already pending gets
+        exactly one redraw, not one per result. Only arming when the
+        timer is idle (not simply restarting it) bounds the delay to
+        ~100 ms from the FIRST pending result -- restarting on every
+        call would let a fast enough burst push the redraw back
+        indefinitely. The final redraw on completion is unconditional
+        regardless (`_nirc2_field_finish_summary`), so the map is never
+        left stale; decisions/log content/numerical results are
+        unchanged, this is purely GUI-thread scheduling."""
+        if not self._n2_field_redraw_timer.isActive():
+            self._n2_field_redraw_timer.start(100)
+
     def _nirc2_field_on_result(self, r, k):
         """Runs on the GUI thread (a queued-connection slot) -- exactly
         the decision/UI logic the old `_nirc2_field_tick` applied after
@@ -1383,7 +1418,7 @@ class Nirc2StrehlTabMixin:
                 f"  star {k}: left off the map — "
                 f"{100 * r.subtracted_frac:.1f}% of its aperture flux was "
                 "neighbour light (reinsertable)")
-            self._nirc2_draw_map()
+            self._nirc2_field_request_redraw()
         elif verdict is None:
             self._n2_field.append(r)
             # EE aperture correction: a small-aperture star gets a
@@ -1407,7 +1442,7 @@ class Nirc2StrehlTabMixin:
                     auto_radius=False)
                 if full.ok and 0 < full.strehl < 1:
                     self._n2_ee_pairs[id(r)] = full
-            self._nirc2_draw_map()
+            self._nirc2_field_request_redraw()
             self.n2_log.appendPlainText(
                 f"  star {k}: SR {r.strehl:.3f} ±{r.sr_err:.3f}  "
                 f"FWHM {r.fwhm_mas:6.2f} mas  pos {r.x:6.1f} {r.y:6.1f}  "
@@ -1466,6 +1501,12 @@ class Nirc2StrehlTabMixin:
         self._n2_field_busy = False
         self.n2_field_btn.setEnabled(True)
         self.n2_field_btn.setText("Measure field")
+        # a coalesced redraw (_nirc2_field_request_redraw) may still be
+        # pending -- stop it here so it cannot fire late against
+        # whatever this tab does next (a new frame, a new field run);
+        # the unconditional draw below (or the caller's own, on the
+        # setup_failed path) is the map's last word for this run.
+        self._n2_field_redraw_timer.stop()
         if setup_failed:
             return
         self.n2_cap_star.setText("MEASURED STAR")
