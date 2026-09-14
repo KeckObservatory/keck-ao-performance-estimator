@@ -1,0 +1,66 @@
+# Changelog
+
+All notable changes to the Keck AO Performance Estimator. The project
+is released on GitHub only (pin `@v1.1.0` in the install URL).
+
+## 1.1.0 — 2026-09-14
+
+### Added
+- Field engine for crowded-field Strehl: `psf_clean_engine="field"`
+  solves every catalogued star of a frame together and subtracts every
+  neighbour before the aperture measurement. GUI default; the library
+  default stays `native`. Validated on 94 synthetic moderate-density
+  fields (matched-target bias +0.012 vs +0.042 for the native engine,
+  tails 2 vs 16).
+- Parallel measurement: `measure_field(..., workers=N)` and
+  `solve_field(..., workers=N)` run per-target measurements and the
+  field solve's ePSF renders in a persistent process pool; results are
+  bit-identical to `workers=1`. `workers=None` resolves to
+  `$KECK_AO_WORKERS`, else `min(8, cpu_count // 2)`; counts above 8
+  need `KECK_AO_WORKERS_UNCAPPED=1`.
+- GUI: "Measure field" runs on worker threads and no longer blocks the
+  window; the button doubles as Cancel while busy; a Workers spin box
+  with config round-trip. Engine selector (field / native) next to the
+  PSF-fit checkbox, saved per target.
+- Regress batteries take `--workers N` (`psf_fit_model.py --full`).
+- Public CI on every push (Python 3.11 and 3.14).
+
+### Changed
+- The empirical PSF model for a target is now weighted at the centre of
+  its 1-arcsec bin, so a cleaned result no longer depends on the order
+  in which stars were measured. Cleaned numbers move by <= 0.003 SR in
+  the median; individual crowded targets can differ by up to ~0.085 SR
+  from 1.0.0. Uncleaned numbers and the IDL goldens are unchanged.
+- PSF-fit cleaning now refuses an unphysical cleaned result (cleaned
+  Strehl > 1 or <= 0, or aperture flux collapsing below 20.6 % of the
+  uncleaned value) and keeps the uncleaned measurement, saying so.
+- The native engine's bias note names both regimes: a small
+  underestimate on isolated pairs, an overestimate of order +0.04 on
+  crowded fields.
+- The S2 bias surface shipped with the regress suite was regenerated
+  with the shipped engine (it was stale).
+
+### Fixed
+- The CLI crashed on a Windows console using the cp1252 code page when
+  printing θ₀/d₀; stdout/stderr are now UTF-8 with replacement.
+- The GUI could re-enable "Measure field" while a field solve was still
+  running, and could accept results computed after the flow had decided
+  to stop.
+- The GUI failed to open when `KECK_AO_WORKERS` held an invalid value.
+- `gui_phase12` regress no longer fails on slow hosted CI runners.
+
+### Known limits
+- Speedup at 8 workers on a 16-core desktop: native field measurement
+  0.46x serial, field engine 0.61x (the ePSF build and the solve's
+  sweeps are serial by design; the parallel parts are memory-bandwidth
+  bound). On a 12-vCPU Linux VM at 6 workers: 0.38x and 0.52x.
+- During "Measure field" the window can still pause for 83-281 ms
+  between paints on each result (per-result panel redraw).
+- On near-singular cleaning targets the last digits of a cleaned Strehl
+  can depend on the machine's OpenBLAS thread count.
+- No native ePSF has yet been built on a real NIRC2 frame; on such
+  frames both engines refuse cleaning and the uncleaned number stands.
+
+## 1.0.0 — 2026-08-12
+
+First public release.

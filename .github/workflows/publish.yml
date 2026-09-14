@@ -1,15 +1,16 @@
 name: Publish to PyPI
 
-# Dormant by design -- NOTHING here runs on a push. It builds and publishes the
-# package only when a GitHub Release is published (the deliberate "we're ready"
-# action), or when dispatched manually. It uses PyPI Trusted Publishing, so it
-# also stays inert until a trusted publisher is configured on PyPI for this
-# repository + workflow (https://docs.pypi.org/trusted-publishers/). Until then
-# the publish step has no credentials and cannot upload.
+# GitHub-only release (Eduardo, 2026-09-14): this project releases on GitHub
+# only -- no PyPI trusted publisher is configured for this repository, and
+# none is planned. Dormant by design -- NOTHING here runs on a push, and it
+# no longer runs on a published GitHub Release either; the only trigger is a
+# manual `workflow_dispatch`, so this job runs only if someone deliberately
+# asks it to. It uses PyPI Trusted Publishing, so even a manual run stays
+# inert until a trusted publisher is configured on PyPI for this repository +
+# workflow (https://docs.pypi.org/trusted-publishers/) -- until then the
+# publish step has no credentials and cannot upload.
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:

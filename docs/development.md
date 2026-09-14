@@ -100,8 +100,9 @@ Two further workflows are wired but **do not run automatically**:
   breaks); it only **deploys** to GitHub Pages when triggered manually
   (`workflow_dispatch`).
 - `publish.yml` builds and publishes the package to PyPI, and runs **only** on a
-  published GitHub Release (or manual dispatch). It uses PyPI Trusted Publishing,
-  so it stays dormant until that is configured on the PyPI side.
+  manual `workflow_dispatch` -- this project releases on GitHub only (Eduardo,
+  2026-09-14), with no PyPI trusted publisher configured, so this job is never
+  triggered automatically and stays dormant regardless.
 
 ## Building the package
 
