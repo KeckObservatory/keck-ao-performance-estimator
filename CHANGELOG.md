@@ -1,7 +1,15 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.2.0` in the install URL).
+is released on GitHub only (pin `@v1.2.1` in the install URL).
+
+## 1.2.1 — 2026-09-15
+
+### Docs
+- Bundled manuals (Help menu) updated to the September 2026 editions:
+  KAON 1556 (GUI manual) documents the Layers page (§8, Figure 26)
+  and the 2.00" seeing-slider cap; KAON 1542 (technical note) adds the
+  layer-mode paragraph to the prediction section. No code change.
 
 ## 1.2.0 — 2026-09-15
 
