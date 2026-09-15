@@ -1117,6 +1117,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                 "theta0": self.pred_theta0.value(),
                 "theta0_auto": self.pred_theta0_auto.isChecked(),
                 "za": self.pred_za.value(),
+                **self._pred_layers_config(),
             },
         }
 
@@ -1134,6 +1135,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                    self.lgs_offset, self.ltao_floor, self.ltao_tt_gain,
                    self.tomo_combo, self.windows_list, self.za_spin,
                    self.za_enable, self.pred_enable, self.pred_theta0_auto,
+                   self.pred_layers_enable,
                    self.fm_osiris_mode, self.fm_osiris_scale,
                    self.fm_osiris_lenslet, self.fm_nirc2_fov, self.fm_for,
                    self.fm_tss,
@@ -1325,6 +1327,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                 r["spin"].setValue(val)
                 r["slider"].setValue(int(round(val * r["scale"])))
             self.pred_theta0_auto.setChecked(pc.get("theta0_auto", True))
+            self._apply_pred_layers_config(pc)
             self.pred_enable.setChecked(pc.get("enabled", False))
         finally:
             for w in widgets:

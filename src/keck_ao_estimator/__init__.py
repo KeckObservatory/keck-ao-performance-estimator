@@ -30,13 +30,13 @@ iers.conf.auto_download = False
 
 from ._version import APP_NAME, CONTACT, MAINTAINER, ORGANIZATION, __version__
 from .atmosphere import (
-    cn2_density_profile, seeing_to_integrated_cn2, theta0_d0_from_profile,
-    zenith_seeing_factor,
+    cn2_density_profile, integrated_cn2_to_seeing, seeing_to_integrated_cn2,
+    theta0_d0_from_profile, zenith_seeing_factor,
 )
 from .budget import (
     ADJUSTABLE_BUDGET_PARAMS, ANG_REF_OFFSET, BUDGET_DEFAULTS, BUDGET_VERSIONS,
     DEF_LASER_PA_DEG, DEF_LGS_OFFSET, DEFAULT_BUDGET_VERSION, FITTING_ERR,
-    LTAO_BW_FLOOR_FRAC,
+    LTAO_BW_FLOOR_FRAC, RECON_PRIOR_ALOFT, RECON_PRIOR_FRAC,
     LTAO_RATE_SINGLE, LTAO_RATE_TOMO, STATIC_TEL, active_budget_overrides,
     apply_budget_version, budget_overrides, get_budget_param, layer_mismatch,
     lgs_budget_terms, lgs_strehl, ltao_bw_factor, static_subtotal,
@@ -68,6 +68,10 @@ from .field_stats import (
 from .fieldmap import (
     field_cn2_profile, field_map_grid, field_metric_at, field_snapshot,
     synthetic_field_snapshot,
+)
+from .layers import (
+    N_RECON_LAYERS, RECON_HEIGHTS_M, fractions_to_layers, layer_from_seeing,
+    layer_seeing, layers_from_seeing_pair, layers_seeing, recon_prior_layers,
 )
 from .geometry import (
     apply_proper_motion, compute_airmass_curve, hour_angle_hours, in_wedge,

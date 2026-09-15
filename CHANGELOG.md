@@ -1,7 +1,33 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.1.0` in the install URL).
+is released on GitHub only (pin `@v1.2.0` in the install URL).
+
+## 1.2.0 — 2026-09-15
+
+### Changed
+- Prediction tab: the DIMM / MASS seeing sliders stop at 2.00" (was
+  3.00"); Mauna Kea seeing is never worse than that. Saved configs with a
+  larger value load clamped to 2.00".
+
+### Added
+- Prediction tab, new **Layers** sub-tab: turbulence **by layer** as
+  turbulence fractions on the LTAO reconstructor's altitude grid (ground +
+  the six MASS bins, the reconstructor's own units, summing to exactly 1:
+  moving one row rescales the others proportionally in either direction;
+  an "Exact" text row + Apply sets all seven verbatim, normalized only if
+  they do not sum to 1). The total (DIMM) seeing sets the scale (its row is
+  repeated on the Layers page) and the free-atm (MASS) seeing follows from
+  the aloft fractions. "Reset layers to reconstructor prior" loads the
+  reconstructor's static fractions (KAON 1542 §3.4; layer mismatch m = 0)
+  and undoes layer edits. θ₀, m, the Cn² profile plot (repeated on the
+  Layers page), the field map and the error terms follow live. Engine:
+  `layers.py` (`fractions_to_layers`, `recon_prior_layers`,
+  `layers_seeing`, `layer_seeing`, `layer_from_seeing`,
+  `layers_from_seeing_pair`), `integrated_cn2_to_seeing`, and
+  `synthetic_field_snapshot(..., cn2_layers=)`. Saved configs carry the
+  mode and the exact fractions; older configs load with layer mode off.
+  Regress `gui_phase42`.
 
 ## 1.1.0 — 2026-09-14
 

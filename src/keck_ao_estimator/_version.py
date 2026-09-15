@@ -4,7 +4,7 @@ Imported by the engine, the GUI, and the packaging metadata (pyproject.toml
 reads __version__ from here), so the version is defined in exactly one place.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 APP_NAME = "Keck AO Performance Estimator"
 MAINTAINER = "Eduardo Marin"

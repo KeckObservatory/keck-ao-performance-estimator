@@ -90,3 +90,19 @@ def seeing_to_integrated_cn2(eps_arcsec_500):
     k2 = (2.0 * np.pi / lam) ** 2
     r0 = 0.98 * lam / np.radians(eps_arcsec_500 / 3600.0)
     return r0 ** (-5.0 / 3.0) / (0.423 * k2)
+
+
+def integrated_cn2_to_seeing(J_sum):
+    """Inverse of seeing_to_integrated_cn2: the seeing [arcsec, 500 nm,
+    zenith] produced by an integrated turbulence sum(J) [m^1/3] --
+    r0 = [0.423 k^2 sum(J)]^(-3/5), eps = 0.98 lam/r0. Zero turbulence gives
+    zero seeing (no division by zero); used by the prediction tab's
+    per-layer strength controls to report the total / free-atm seeing a set
+    of layer strengths implies."""
+    lam = 500e-9
+    k2 = (2.0 * np.pi / lam) ** 2
+    J_sum = float(J_sum)
+    if not np.isfinite(J_sum) or J_sum <= 0.0:
+        return 0.0
+    r0 = (0.423 * k2 * J_sum) ** (-3.0 / 5.0)
+    return float(np.degrees(0.98 * lam / r0) * 3600.0)

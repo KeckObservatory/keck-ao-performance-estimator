@@ -5,6 +5,7 @@ wind-weighted-bandwidth readouts it drives.
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.ticker import LogFormatterSciNotation, LogLocator, NullFormatter
 from qtcompat import Qt, QtWidgets
 
 import keck_ao_estimator as engine
@@ -51,10 +52,11 @@ class PredictionTabMixin:
         ref_th0 = engine.synthetic_field_snapshot(
             engine.REF_TOTAL, engine.REF_FREEATM)["theta0_k_zenith"]
         for key, label, lo, hi, step, default, dec, suffix, scale in (
+                # 2.00" ceiling: Mauna Kea seeing is never worse than that
                 ("dimm",   "DIMM total seeing (zenith)",
-                 0.20, 3.00, 0.01, engine.REF_TOTAL,   2, " ″", 100.0),
+                 0.20, 2.00, 0.01, engine.REF_TOTAL,   2, " ″", 100.0),
                 ("mass",   "MASS free-atm seeing (zenith)",
-                 0.05, 3.00, 0.01, engine.REF_FREEATM, 2, " ″", 100.0),
+                 0.05, 2.00, 0.01, engine.REF_FREEATM, 2, " ″", 100.0),
                 ("theta0", "θ₀ (K-band, zenith)",
                  1.0, 60.0, 0.5, ref_th0,              1, " ″", 10.0),
                 ("za",     "Zenith angle",
@@ -99,6 +101,7 @@ class PredictionTabMixin:
         # and the long form forced a panel scrollbar (631045c); the full
         # wording lives in the tooltip
         pbox = QtWidgets.QGroupBox("Presets (same total seeing)")
+        self._pred_presets_box = pbox
         pbox.setToolTip("Same total seeing, turbulence moved ground↔aloft: "
                         "the presets change only WHERE the turbulence sits.")
         pv = QtWidgets.QVBoxLayout(pbox)
@@ -126,11 +129,409 @@ class PredictionTabMixin:
             QtWidgets.QSizePolicy.Policy.Expanding)
         v.addWidget(self.pred_prof_canvas, 1)
 
+        # The dock must never need to scroll (house rule): the layer-strength
+        # panel is a SUB-TAB of Prediction rather than more rows under the
+        # scenario page, and a top-level tab would push the already-full
+        # control tab bar further into its overflow arrows.
+        self.pred_subtabs = QtWidgets.QTabWidget()
+        self.pred_subtabs.addTab(w, "Scenario")
+        self.pred_subtabs.addTab(self._build_pred_layers_page(), "Layers")
+        self._pred_prof_stale = [False, False]     # per sub-page plot copy
+        self.pred_subtabs.currentChanged.connect(self._on_pred_subtab_changed)
+
         self.pred_enable.toggled.connect(self._on_pred_toggle)
+        self._sync_pred_layers_ui()      # initial: layer mode off
         self._pred_autoset_theta0()      # initial: auto on -> row read-only
         self._update_pred_readout()
         self._update_pred_profile_plot()
-        return self._scroll(w)
+        return self._scroll(self.pred_subtabs)
+
+    # ---- turbulence by layer (reconstructor altitudes) -----------------------
+    # Per-layer controls are turbulence FRACTIONS -- the reconstructor's own
+    # units (KAON 1542 sect. 3.4 (2)): the share of the integrated turbulence
+    # (Cn2*dh) in each of the 7 layers, summing to 1. The absolute scale is
+    # the Scenario page's total (DIMM) seeing; the free-atm (MASS) seeing
+    # follows from the aloft share, eps_fa = eps_tot * (sum aloft)^(3/5).
+    # The sum is ALWAYS exactly 1 (fractions of the whole; anything else is
+    # unphysical): a slider/spin edit of one row rescales the OTHER rows
+    # proportionally to fill 1 - value (turbulence moves between layers,
+    # their mutual ratios kept), in both directions. To set all seven
+    # exactly, without that redistribution, type them into the text row and
+    # Apply (normalized to 1 if they do not already sum to it).
+    PRED_LAYER_FRAC_STEP = 0.01
+    # The exact fractions live in self._pred_layer_frac; the spins DISPLAY
+    # them to 3 decimals. A user edit writes that row's exact value from the
+    # spin; the reconstructor button writes the unrounded table, so the prior
+    # round-trips to m = 0 exactly.
+
+    def _build_pred_layers_page(self):
+        """The Prediction tab's "Layers" sub-page: 7 fraction rows on the
+        reconstructor's altitude grid (ground + the 6 MASS bins), a button
+        that loads the reconstructor's static prior, and a live readout of
+        the free-atm / ground seeing the fractions imply at the Scenario
+        page's total seeing. While the mode is on, the Scenario page's MASS
+        row is DERIVED (read-only), DIMM stays the scale, the presets are
+        gated off; the field map and error terms use the aloft 6 layers as
+        the Cn2 profile directly."""
+        page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(page)
+        note = QtWidgets.QLabel(
+            "<b>Turbulence by layer.</b> Fractions of the turbulence per "
+            "layer of the LTAO reconstructor's grid (sum = 1, the "
+            "reconstructor's units). DIMM sets the scale; MASS follows from "
+            "the aloft fractions while layer mode is on.")
+        note.setWordWrap(True)
+        note.setStyleSheet("QLabel { color:#333; background:#fdf3e7; "
+                           "padding:6px; border:1px solid #e0cdb0; }")
+        v.addWidget(note)
+        box = QtWidgets.QGroupBox("Turbulence fractions by layer (Σ = 1)")
+        box.setToolTip(
+            "Share of the integrated turbulence (Cn²·dh) in each layer at "
+            "0 / 0.5 / 1 / 2 / 4 / 8 / 16 km above the summit. The sum is "
+            "always 1: moving one row rescales the other rows proportionally "
+            "to make up the difference. To set all seven exactly, type them "
+            "in the text row and Apply.")
+        lv = QtWidgets.QVBoxLayout(box)
+
+        self.pred_layers_enable = QtWidgets.QCheckBox("Set turbulence by layer")
+        self.pred_layers_enable.setToolTip(
+            "Drive the scenario from the 7 layer fractions below. Total "
+            "seeing stays the Scenario page's DIMM value; free-atm = the "
+            "aloft share; \u03b8\u2080 (auto) and the layer mismatch m come "
+            "from the aloft layers themselves.")
+        self.pred_layers_enable.setMinimumWidth(120)   # floor, not text width
+        lv.addWidget(self.pred_layers_enable)
+
+        # short label: the dock is ~400 px wide and a QPushButton clips
+        # rather than wraps; the tooltip carries the detail
+        self.pred_layers_recon_btn = QtWidgets.QPushButton(
+            "Reset layers to reconstructor prior")
+        self.pred_layers_recon_btn.setMinimumWidth(120)
+        self.pred_layers_recon_btn.setToolTip(
+            "Load the K1 tomographic reconstructor's static layer prior "
+            "(KAON 1542 \u00a73.4: fractions "
+            + ", ".join(f"{f:.4f}" for f in engine.RECON_PRIOR_FRAC)
+            + " at 0/0.5/1/2/4/8/16 km) into the rows -- also the way to "
+            "undo layer edits. Enables layer mode; the total seeing is "
+            "unchanged and the free-atm seeing becomes the prior's aloft "
+            "share (layer mismatch m = 0).")
+        lv.addWidget(self.pred_layers_recon_btn)
+
+        # the total (DIMM) seeing, mirrored two-way with the Scenario page's
+        # row so the scale can be set without leaving this page
+        drow = QtWidgets.QHBoxLayout()
+        dl = QtWidgets.QLabel("DIMM total seeing (zenith)")
+        dl.setMinimumWidth(200)
+        dr = self._pred_rows["dimm"]
+        self.pred_layers_dimm_slider = QtWidgets.QSlider(Qt.Orientation.Horizontal)
+        self.pred_layers_dimm_slider.setRange(dr["slider"].minimum(),
+                                              dr["slider"].maximum())
+        self.pred_layers_dimm_slider.setValue(dr["slider"].value())
+        self.pred_layers_dimm = _dspin(dr["spin"].minimum(), dr["spin"].maximum(),
+                                       dr["spin"].singleStep(), dr["spin"].value(),
+                                       dr["spin"].decimals(), dr["spin"].suffix())
+        self.pred_layers_dimm.setToolTip(
+            "Total seeing at zenith -- the same control as on the Scenario "
+            "page; it sets the absolute scale of the layer fractions.")
+        drow.addWidget(dl)
+        drow.addWidget(self.pred_layers_dimm_slider, 1)
+        drow.addWidget(self.pred_layers_dimm)
+        lv.addLayout(drow)
+        self.pred_layers_dimm_slider.valueChanged.connect(
+            lambda val, s=self.pred_layers_dimm, sc=dr["scale"]: s.setValue(val / sc))
+        self.pred_layers_dimm.valueChanged.connect(
+            lambda val, sl=self.pred_layers_dimm_slider, sc=dr["scale"]:
+            sl.setValue(int(round(val * sc))))
+        self.pred_layers_dimm.valueChanged.connect(self.pred_dimm.setValue)
+        self.pred_dimm.valueChanged.connect(self._sync_pred_layers_dimm)
+
+        self._pred_layer_rows = []
+        scale = 1000.0
+        # start from the DIMM/MASS pair's own split (reconstructor aloft
+        # shape) so the panel is never blank
+        J0 = engine.layers_from_seeing_pair(self.pred_dimm.value(),
+                                            self.pred_mass.value())
+        f0 = engine.layers_seeing(J0)["frac"]
+        for i, h_m in enumerate(engine.RECON_HEIGHTS_M):
+            row = QtWidgets.QHBoxLayout()
+            label = ("0 km (ground)" if i == 0
+                     else f"{h_m / 1e3:g} km")
+            lbl = QtWidgets.QLabel(label)
+            lbl.setMinimumWidth(200)
+            slider = QtWidgets.QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, int(round(1.0 * scale)))
+            slider.setValue(int(round(float(f0[i]) * scale)))
+            spin = _dspin(0.0, 1.0, self.PRED_LAYER_FRAC_STEP, float(f0[i]), 3)
+            spin.setToolTip(f"fraction of the turbulence in the {label} layer")
+            row.addWidget(lbl)
+            row.addWidget(slider, 1)
+            row.addWidget(spin)
+            lv.addLayout(row)
+            self._pred_layer_rows.append(dict(slider=slider, spin=spin,
+                                              scale=scale, hbox=row,
+                                              label=lbl))
+            slider.valueChanged.connect(
+                lambda val, s=spin, sc=scale: s.setValue(val / sc))
+            spin.valueChanged.connect(
+                lambda val, sl=slider, sc=scale: sl.setValue(int(round(val * sc))))
+            spin.valueChanged.connect(
+                lambda val, i=i: self._on_pred_layer_spin(i, val))
+        self.pred_layers = [r["spin"] for r in self._pred_layer_rows]
+        self._pred_layer_frac = [float(x) for x in f0]
+        self._pred_layers_note = ""          # one-shot note under the readout
+
+        # exact entry: all seven at once, no proportional redistribution
+        erow = QtWidgets.QHBoxLayout()
+        el = QtWidgets.QLabel("Exact:")
+        self.pred_layers_edit = QtWidgets.QLineEdit()
+        self.pred_layers_edit.setMinimumWidth(60)   # floor, never widens the panel
+        self.pred_layers_edit.setToolTip(
+            "Type the 7 fractions (ground, 0.5, 1, 2, 4, 8, 16 km), separated "
+            "by spaces or commas, then Apply (or Enter). They are set "
+            "verbatim -- no proportional redistribution -- and normalized to "
+            "sum to 1 only if they do not already.")
+        self.pred_layers_apply_btn = QtWidgets.QPushButton("Apply")
+        self.pred_layers_apply_btn.setMinimumWidth(60)
+        erow.addWidget(el)
+        erow.addWidget(self.pred_layers_edit, 1)
+        erow.addWidget(self.pred_layers_apply_btn)
+        lv.addLayout(erow)
+        self.pred_layers_apply_btn.clicked.connect(self._apply_pred_layers_text)
+        self.pred_layers_edit.returnPressed.connect(self._apply_pred_layers_text)
+        self._refresh_pred_layers_text(force=True)
+
+        self.pred_layers_readout = QtWidgets.QLabel()
+        self.pred_layers_readout.setWordWrap(True)
+        set_cue(self.pred_layers_readout, "secondary")
+        lv.addWidget(self.pred_layers_readout)
+        v.addWidget(box)
+        self._pred_layers_box = box
+
+        # the Scenario page's Cn2 profile plot, repeated here so the profile
+        # is in view while the layers are dragged (same twin panels, same
+        # data; each page's copy is drawn when that page is showing)
+        self.pred_layers_prof_fig = Figure(figsize=(3.4, 3.0))
+        self.pred_layers_prof_canvas = FigureCanvas(self.pred_layers_prof_fig)
+        self.pred_layers_prof_canvas.setMinimumHeight(200)
+        self.pred_layers_prof_canvas.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding)
+        v.addWidget(self.pred_layers_prof_canvas, 1)
+
+        self.pred_layers_enable.toggled.connect(self._on_pred_layers_toggle)
+        self.pred_layers_recon_btn.clicked.connect(self._apply_recon_prior_layers)
+        self._update_pred_layers_readout()
+        return page
+
+    def _pred_layer_fractions(self):
+        """The 7 layer fractions as entered (exact values, not the spins'
+        3-decimal display); may sum to less than 1."""
+        return np.array(self._pred_layer_frac, float)
+
+    def _pred_layer_values(self):
+        """The 7 layer strengths J [m^1/3, 500 nm, zenith] the fractions
+        imply at the Scenario page's total (DIMM) seeing (fractions
+        normalized to 1; an all-zero set falls back to the reconstructor
+        shape so the scenario never loses its turbulence)."""
+        f = self._pred_layer_fractions()
+        if f.sum() <= 0.0:
+            f = engine.RECON_PRIOR_FRAC
+        return engine.fractions_to_layers(f, self.pred_dimm.value())
+
+    def _on_pred_layer_spin(self, i, val):
+        """A fraction row was moved: the sum stays exactly 1. The OTHER rows
+        are rescaled proportionally (their mutual ratios kept) to fill
+        1 - value, whichever way this row went -- turbulence moves between
+        this layer and the rest. If the others are all empty the remainder
+        is split equally among them (no ratio to keep)."""
+        val = min(max(float(val), 0.0), 1.0)
+        f = list(self._pred_layer_frac)
+        others = [k for k in range(len(f)) if k != i]
+        others_sum = float(sum(f[k] for k in others))
+        room = 1.0 - val
+        for k in others:
+            f[k] = (f[k] * room / others_sum if others_sum > 0.0
+                    else room / len(others))
+        f[i] = val
+        self._pred_layers_note = ""
+        self._set_pred_layer_fractions(f)          # writes all rows, blocked
+        self._on_pred_layer_changed()
+
+    def _refresh_pred_layers_text(self, force=False):
+        """Mirror the current fractions into the exact-entry field, unless
+        the user is mid-edit there (the field is modified and not applied)."""
+        if not force and self.pred_layers_edit.isModified():
+            return
+        self.pred_layers_edit.setText(
+            " ".join(f"{x:.4f}" for x in self._pred_layer_frac))
+        self.pred_layers_edit.setCursorPosition(0)   # show the ground end first
+        self.pred_layers_edit.setModified(False)
+
+    def _apply_pred_layers_text(self, *_):
+        """'Apply': the 7 typed fractions, verbatim (no redistribution),
+        normalized to sum 1 only if they do not already. Enables layer
+        mode. A malformed entry is refused with the reason in the readout
+        and the rows untouched."""
+        import re
+        text = self.pred_layers_edit.text()
+        parts = [t for t in re.split(r"[\s,;]+", text.strip()) if t]
+        try:
+            vals = [float(t) for t in parts]
+        except ValueError:
+            vals = None
+        n = len(self.pred_layers)
+        if vals is None or len(vals) != n or any(
+                not np.isfinite(v) or v < 0 for v in vals):
+            self._pred_layers_note = (f"Apply refused: need {n} non-negative "
+                                      f"numbers, got {text.strip()!r}.")
+            self._update_pred_layers_readout()
+            return
+        tot = float(sum(vals))
+        if tot <= 0.0:
+            self._pred_layers_note = "Apply refused: all seven are zero."
+            self._update_pred_layers_readout()
+            return
+        if abs(tot - 1.0) > 5e-4:
+            vals = [v / tot for v in vals]
+            self._pred_layers_note = (f"Typed values summed to {tot:.3f}; "
+                                      f"normalized to 1.")
+        else:
+            self._pred_layers_note = ""
+        self._set_pred_layer_fractions(vals)
+        self.pred_layers_edit.setModified(False)
+        self._refresh_pred_layers_text(force=True)
+        if not self._pred_layers_on():
+            self.pred_layers_enable.setChecked(True)   # toggle -> sync + changed
+        else:
+            self._on_pred_layer_changed()
+
+    def _sync_pred_layers_dimm(self, *_):
+        """Mirror the Scenario page's DIMM row into the Layers page's copy
+        (signals blocked: the Scenario row is the source of truth)."""
+        val = self.pred_dimm.value()
+        sc = self._pred_rows["dimm"]["scale"]
+        for w in (self.pred_layers_dimm, self.pred_layers_dimm_slider):
+            w.blockSignals(True)
+        self.pred_layers_dimm.setValue(val)
+        self.pred_layers_dimm_slider.setValue(int(round(val * sc)))
+        for w in (self.pred_layers_dimm, self.pred_layers_dimm_slider):
+            w.blockSignals(False)
+
+    def _set_pred_layer_fractions(self, f):
+        """Write 7 fractions into the rows without firing the per-row
+        handler 7 times; the caller runs _on_pred_layer_changed() once."""
+        for i, (r, x) in enumerate(zip(self._pred_layer_rows,
+                                       np.asarray(f, float))):
+            x = min(max(float(x), 0.0), 1.0)
+            self._pred_layer_frac[i] = x
+            for w in (r["spin"], r["slider"]):
+                w.blockSignals(True)
+            r["spin"].setValue(x)
+            r["slider"].setValue(int(round(x * r["scale"])))
+            for w in (r["spin"], r["slider"]):
+                w.blockSignals(False)
+
+    def _apply_recon_prior_layers(self, *_):
+        """'Reset layers to reconstructor prior': the prior's fractions into
+        the rows (the reconstructor's table, verbatim), layer mode on so the
+        MASS row, theta0, the readouts, the profile plot and the field map
+        all follow (free-atm becomes the prior's aloft share; m = 0). Also
+        how per-layer edits are undone."""
+        self._pred_layers_note = ""
+        self._set_pred_layer_fractions(engine.RECON_PRIOR_FRAC)
+        if not self.pred_layers_enable.isChecked():
+            self.pred_layers_enable.setChecked(True)   # toggle -> sync + changed
+        else:
+            self._on_pred_layer_changed()
+
+    def _pred_layers_at_recon_prior(self):
+        """True while the fractions equal the reconstructor prior."""
+        return bool(np.allclose(self._pred_layer_fractions(),
+                                engine.RECON_PRIOR_FRAC, rtol=0, atol=5e-4))
+
+    def _sync_pred_layers_ui(self):
+        """Layer mode on: the MASS row is derived (read-only) and the presets
+        (seeing-pair scenarios) are gated off; DIMM stays the scale. Off:
+        restored."""
+        on = self.pred_layers_enable.isChecked()
+        r = self._pred_rows["mass"]
+        r["spin"].setEnabled(not on)
+        r["slider"].setEnabled(not on)
+        self._pred_presets_box.setEnabled(not on)
+
+    def _on_pred_layers_toggle(self, on):
+        self._sync_pred_layers_ui()
+        if on:
+            self._on_pred_layer_changed()       # derive MASS from the layers
+        else:
+            self._update_pred_layers_readout()  # "(not applied)" state
+            self._on_pred_changed()             # DIMM/MASS rows rule again
+
+    def _sync_pred_mass_from_layers(self):
+        """Layer mode: mirror the free-atm seeing the fractions imply (at
+        the current DIMM total) into the MASS row, signals blocked -- that
+        row is derived now. Called from _on_pred_changed so a DIMM edit in
+        layer mode re-derives MASS before anything downstream reads it."""
+        ls = engine.layers_seeing(self._pred_layer_values())
+        r = self._pred_rows["mass"]
+        eps = min(max(ls["eps_fa"], r["spin"].minimum()), r["spin"].maximum())
+        for w in (r["spin"], r["slider"]):
+            w.blockSignals(True)
+        r["spin"].setValue(eps)
+        r["slider"].setValue(int(round(eps * r["scale"])))
+        for w in (r["spin"], r["slider"]):
+            w.blockSignals(False)
+
+    def _pred_layers_on(self):
+        box = getattr(self, "pred_layers_enable", None)
+        return box is not None and box.isChecked()
+
+    def _on_pred_layer_changed(self, *_):
+        """A fraction moved (or layer mode came on): refresh the layer
+        readout and run the normal scenario update (which re-derives MASS,
+        theta0 auto, readouts, profile plot, field map / terms)."""
+        self._update_pred_layers_readout()
+        if self._pred_layers_on():
+            self._on_pred_changed()
+
+    def _update_pred_layers_readout(self):
+        J = self._pred_layer_values()
+        ls = engine.layers_seeing(J)
+        m = engine.layer_mismatch(ls["cn2_bins"])
+        # kept to ~3 lines at the dock width: the page must not scroll
+        state = ("driving the scenario" if self._pred_layers_on()
+                 else "not applied — enable to use")
+        origin = ("Layers = the reconstructor prior"
+                  if self._pred_layers_at_recon_prior()
+                  else "Layers differ from the reconstructor prior")
+        note = f" {self._pred_layers_note}" if self._pred_layers_note else ""
+        self.pred_layers_readout.setText(
+            f"DIMM {ls['eps_tot']:.2f}″ → free-atm "
+            f"{ls['eps_fa']:.2f}″ ({100 * float(ls['frac'][1:].sum()):.0f}% "
+            f"aloft), ground {ls['eps_ground']:.2f}″, m={m:.2f}. "
+            f"{origin}.{note} ({state})")
+        if hasattr(self, "pred_layers_edit"):
+            self._refresh_pred_layers_text()
+
+    def _pred_layers_config(self):
+        return {"layers_enabled": self._pred_layers_on(),
+                "layer_fractions": [float(x) for x in self._pred_layer_frac]}
+
+    def _apply_pred_layers_config(self, pc):
+        """Restore the fraction rows + mode from a config dict (called inside
+        _apply_config with the bulk signal block active for the enable box,
+        so the spins are written directly and the mode synced by hand)."""
+        f = pc.get("layer_fractions")
+        if f is not None and len(f) == len(self.pred_layers):
+            self._set_pred_layer_fractions(f)
+        self._pred_layers_note = ""
+        self._refresh_pred_layers_text(force=True)
+        self.pred_layers_enable.setChecked(bool(pc.get("layers_enabled", False)))
+        self._sync_pred_layers_ui()
+        self._sync_pred_layers_dimm()      # DIMM was applied with signals blocked
+        if self._pred_layers_on():
+            self._sync_pred_mass_from_layers()
+        self._update_pred_layers_readout()
 
     def _update_pred_profile_plot(self):
         """Redraw the synthesized scenario's Cn² profile as twin panels sharing
@@ -142,11 +543,30 @@ class PredictionTabMixin:
         free-atm, below MASS sensing) is shown separately."""
         s = self._pred_snapshot()
         j_ground = self._ground_layer_j(s["eps_tot_zenith"], s["eps_fa_zenith"])
-        self._draw_cn2_profiles(
-            self.pred_prof_fig, s["cn2_bins"], j_ground,
-            f"Synthesized MK profile — θ₀ᴷ {s['theta0_k_zenith']:.1f}″, "
-            f"α={s['alpha']:+.2f}, m={s['m']:.2f}")
-        self.pred_prof_canvas.draw_idle()
+        if s.get("cn2_layers") is not None:
+            title = (f"Layer profile (reconstructor grid) — θ₀ᴷ "
+                     f"{s['theta0_k_zenith']:.1f}″, m={s['m']:.2f}")
+        else:
+            title = (f"Synthesized MK profile — θ₀ᴷ {s['theta0_k_zenith']:.1f}″, "
+                     f"α={s['alpha']:+.2f}, m={s['m']:.2f}")
+        # the same profile on both sub-pages (Scenario / Layers); only the
+        # showing page's copy is drawn now, the other is marked stale and
+        # caught up when it is switched to (_on_pred_subtab_changed)
+        copies = ((self.pred_prof_fig, self.pred_prof_canvas),
+                  (self.pred_layers_prof_fig, self.pred_layers_prof_canvas))
+        cur = self.pred_subtabs.currentIndex() if hasattr(self, "pred_subtabs") else 0
+        for i, (fig, canvas) in enumerate(copies):
+            if hasattr(self, "pred_subtabs") and i != cur:
+                self._pred_prof_stale[i] = True
+                continue
+            self._draw_cn2_profiles(fig, s["cn2_bins"], j_ground, title)
+            canvas.draw_idle()
+            if hasattr(self, "_pred_prof_stale"):
+                self._pred_prof_stale[i] = False
+
+    def _on_pred_subtab_changed(self, idx):
+        if self._pred_prof_stale[idx]:
+            self._update_pred_profile_plot()
 
     @staticmethod
     def _ground_layer_j(eps_tot_zenith, eps_fa_zenith):
@@ -176,6 +596,14 @@ class PredictionTabMixin:
                 ax.plot([xgnd], [0.1], "s", color=FM_C_STAR, ms=7,
                         label="ground layer")
             ax.set_xscale("log")
+            # a narrow range (within one decade) has no decade tick to label
+            # and matplotlib then labels every minor tick, which collide on
+            # a 3-inch panel: label 1/2/5 per decade, nothing else
+            ax.xaxis.set_major_locator(LogLocator(base=10.0, subs=(1.0, 2.0, 5.0)))
+            ax.xaxis.set_major_formatter(
+                LogFormatterSciNotation(base=10.0, labelOnlyBase=False))
+            ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs="auto"))
+            ax.xaxis.set_minor_formatter(NullFormatter())
             ax.set_xlabel(xlab, fontsize=8)
             ax.tick_params(labelsize=7)
             ax.grid(alpha=0.3, which="both")
@@ -193,10 +621,11 @@ class PredictionTabMixin:
         Data-tab selection so the readout works before the first Run)."""
         lam = (self.prep.lam_nm if self.prep is not None
                else self._current_wavelength()[0])
+        layers = self._pred_layer_values() if self._pred_layers_on() else None
         return engine.synthetic_field_snapshot(
             self.pred_dimm.value(), self.pred_mass.value(),
             self.pred_za.value(), lam,
-            theta0_k_zenith=self.pred_theta0.value())
+            theta0_k_zenith=self.pred_theta0.value(), cn2_layers=layers)
 
     def _fm_args(self):
         """args for the field-map/terms prediction path: the cached run args
@@ -250,9 +679,10 @@ class PredictionTabMixin:
         r["slider"].setEnabled(not auto)
         if not auto:
             return
+        layers = self._pred_layer_values() if self._pred_layers_on() else None
         th0 = engine.synthetic_field_snapshot(
             self.pred_dimm.value(),
-            self.pred_mass.value())["theta0_k_zenith"]
+            self.pred_mass.value(), cn2_layers=layers)["theta0_k_zenith"]
         th0 = min(max(th0, r["spin"].minimum()), r["spin"].maximum())
         if abs(th0 - r["spin"].value()) > 1e-9:
             for w in (r["spin"], r["slider"]):
@@ -266,16 +696,24 @@ class PredictionTabMixin:
         s = self._pred_snapshot()
         clamp = ("  ⚠ free-atm clamped to total"
                  if self.pred_mass.value() > self.pred_dimm.value() else "")
+        if s.get("cn2_layers") is not None:
+            prof = ("Cn² profile from the layer strengths (reconstructor "
+                    "altitudes): ")
+        else:
+            prof = (f"Synthesized Cn² profile: altitude tilt "
+                    f"α={s['alpha']:+.2f}, ")
         self.pred_readout.setText(
             f"Line of sight at ZA {s['zenith_angle_deg']:g}° "
             f"(X={s['airmass']:.2f}): seeing {s['eps_tot_los']:.2f}″, "
             f"free-atm {s['eps_fa_los']:.2f}″, θ₀ {s['theta0_los']:.1f}″ at "
-            f"the science wavelength.  Synthesized Cn² profile: altitude tilt "
-            f"α={s['alpha']:+.2f}, LTAO layer mismatch m={s['m']:.2f} (vs the "
+            f"the science wavelength.  {prof}"
+            f"LTAO layer mismatch m={s['m']:.2f} (vs the "
             f"reconstructor prior), laser/TT anisoplanatism "
             f"×{s['aniso_scale']:.2f} vs the median MK profile.{clamp}")
 
     def _on_pred_changed(self, *_):
+        if self._pred_layers_on():
+            self._sync_pred_mass_from_layers()   # MASS is derived in layer mode
         self._pred_autoset_theta0()      # before the readout/render see theta0
         self._update_pred_readout()
         self._update_pred_profile_plot()

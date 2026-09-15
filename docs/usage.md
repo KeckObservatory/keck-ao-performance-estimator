@@ -14,7 +14,17 @@ The GUI is organised as tabs that feed one shared engine:
   optional arcsec target offset, and a saved-target list.
 - **NGS / LGS / WFE** — guide-star magnitudes, the laser/LTAO configuration, the
   tip-tilt sensor (STRAP or TRICK), and the error-budget sliders.
-- **Prediction** — a hypothetical-conditions scenario.
+- **Prediction** — a hypothetical-conditions scenario: a DIMM/MASS seeing
+  pair (*Scenario*), or the turbulence set **by layer** on the *Layers*
+  sub-tab as turbulence **fractions** on the LTAO reconstructor's altitude
+  grid (0/0.5/1/2/4/8/16 km, the reconstructor's own units, summing to 1:
+  moving one row rescales the others proportionally; the *Exact* row + Apply
+  sets all seven verbatim). The total (DIMM) seeing, repeated on the Layers
+  page, sets the scale and the free-atm (MASS) seeing follows from the aloft
+  fractions. *Reset layers to
+  reconstructor prior* loads the reconstructor's static fractions (and undoes
+  layer edits); θ₀, the layer mismatch, the Cn² profile plot (shown on both
+  pages), the field map and the error terms follow live.
 - **SR tool** — measure Strehl, FWHM and wavefront error directly from a NIRC2
   or OSIRIS frame and compare them against the prediction for that instant.
 

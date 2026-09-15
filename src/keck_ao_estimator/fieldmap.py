@@ -119,7 +119,7 @@ def field_cn2_profile(args, prep, res, when="window", time_hst=None):
 
 def synthetic_field_snapshot(eps_tot_zenith, eps_fa_zenith,
                              zenith_angle_deg=0.0, lam_nm=LAMBDA_K_NM,
-                             theta0_k_zenith=None):
+                             theta0_k_zenith=None, cn2_layers=None):
     """Build a field_snapshot()-shaped dict for a HYPOTHETICAL scenario, so
     field_map_grid() can predict performance for conditions the user dials in
     rather than a night's data. Inputs are ZENITH values (the convention MKWC
@@ -137,12 +137,30 @@ def synthetic_field_snapshot(eps_tot_zenith, eps_fa_zenith,
     the profile's theta0 matches the requested one -- i.e. a small requested
     theta0 pushes the turbulence aloft, a large one pulls it down, and the
     layer mismatch m follows from that same profile. No new fitted constants.
+
+    cn2_layers : optional 7 layer strengths J [m^1/3, 500 nm, zenith] on the
+        reconstructor's altitude grid (ground + the 6 MASS bins; see
+        layers.py). When given they REPLACE the seeing pair and the
+        synthesized shape: total / free-atm seeing are what the layers imply
+        (eps_tot_zenith / eps_fa_zenith are ignored), the aloft 6 bins are
+        used as the Cn2 profile directly (so m is that profile's real
+        mismatch against the reconstructor prior, 0 when the layers ARE the
+        prior), theta0 defaults to the profile's own value and alpha is
+        reported as NaN (no tilt was solved). An explicit theta0_k_zenith
+        still overrides theta0 and re-weights the aniso terms as before.
     """
+    if cn2_layers is not None:
+        from .layers import layers_seeing            # local: avoid a cycle
+        ls = layers_seeing(cn2_layers)
+        eps_tot_zenith, eps_fa_zenith = ls["eps_tot"], ls["eps_fa"]
+        J_layers = ls["cn2_bins"]
+    else:
+        J_layers = None
     eps_fa_zenith = min(float(eps_fa_zenith), float(eps_tot_zenith))
     zf = zenith_seeing_factor(zenith_angle_deg)
     cosz = np.cos(np.radians(min(abs(zenith_angle_deg), 85.0)))
 
-    J_tot = seeing_to_integrated_cn2(eps_fa_zenith)
+    J_tot = seeing_to_integrated_cn2(eps_fa_zenith) if eps_fa_zenith > 0 else 0.0
 
     def profile(alpha):
         # base = the measured MK free-atmosphere shape (tropopause-dominated),
@@ -153,7 +171,15 @@ def synthetic_field_snapshot(eps_tot_zenith, eps_fa_zenith,
     def th0_of(alpha):        # profile theta0 at K-band, zenith
         return theta0_d0_from_profile(profile(alpha), 0.0, LAMBDA_K_NM)[0]
 
-    if theta0_k_zenith is None:
+    if J_layers is not None:
+        # explicit layers: the profile IS the layers; no altitude tilt
+        alpha = float("nan")
+        th0_layers = theta0_d0_from_profile(J_layers, 0.0, LAMBDA_K_NM)[0]
+        if theta0_k_zenith is None:
+            theta0_k_zenith = th0_layers
+        else:
+            theta0_k_zenith = float(theta0_k_zenith)
+    elif theta0_k_zenith is None:
         alpha = 0.0
         theta0_k_zenith = th0_of(0.0)
     else:
@@ -173,7 +199,7 @@ def synthetic_field_snapshot(eps_tot_zenith, eps_fa_zenith,
                 else:
                     hi = mid
             alpha = 0.5 * (lo + hi)
-    J = profile(alpha)
+    J = J_layers if J_layers is not None else profile(alpha)
 
     theta0_los = (theta0_k_zenith * (lam_nm / LAMBDA_K_NM) ** (6.0 / 5.0)
                   * cosz ** (8.0 / 5.0))
@@ -181,6 +207,9 @@ def synthetic_field_snapshot(eps_tot_zenith, eps_fa_zenith,
     # MK profile shape (equivalent to theta0 ~ 1/eps_fa). Requesting a theta0
     # different from that shape's value at this seeing re-weights the altitude
     # moment by g^(5/3), so the aniso WFE terms carry g^(5/6):
+    # (with explicit layers th0_of(0.0) is still the MK-shape theta0 at the
+    # layers' free-atm seeing, so a ground-heavy or aloft-heavy layer set
+    # re-weights the aniso terms exactly as an equivalent theta0 request.)
     aniso_scale = (th0_of(0.0) / theta0_k_zenith) ** (5.0 / 6.0)
     return dict(
         eps_tot_los=eps_tot_zenith * zf, eps_fa_los=eps_fa_zenith * zf,
@@ -192,7 +221,9 @@ def synthetic_field_snapshot(eps_tot_zenith, eps_fa_zenith,
         theta0_k_zenith=float(theta0_k_zenith),
         zenith_angle_deg=float(zenith_angle_deg),
         aniso_scale=float(aniso_scale),
-        alpha=float(alpha), m=float(layer_mismatch(J)))
+        alpha=float(alpha), m=float(layer_mismatch(J)),
+        cn2_layers=(None if cn2_layers is None
+                    else np.asarray(cn2_layers, float).copy()))
 
 
 def field_map_grid(args, prep, snap, mode, metric, ngs_xy, tt_xy, laser_xy,

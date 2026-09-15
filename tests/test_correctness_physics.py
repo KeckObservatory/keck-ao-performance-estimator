@@ -501,3 +501,75 @@ class TestStrapFaintEndSteepening:
         # goldens must be untouched by the faint-end graft
         t = engine.tt_wfe_nm(1.0, 15.2, 19.3, sensor="strap") / NM_PER_MAS
         assert abs(t - 19.52) < 0.1, t  # pre-graft value, must not move
+
+
+class TestLayerStrengths:
+    """layers.py: turbulence by layer on the reconstructor's altitude grid.
+    Ground truth is the Kolmogorov seeing relation itself -- eps = 0.98
+    lam/r0, r0 = [0.423 k^2 J]^(-3/5) -- so seeing scales as J^(3/5) and
+    layer strengths combine as a 5/3-power sum, never a plain sum."""
+
+    @staticmethod
+    def _eps_of_J(J):
+        lam = 500e-9
+        k2 = (2 * math.pi / lam) ** 2
+        r0 = (0.423 * k2 * J) ** (-3 / 5)
+        return math.degrees(0.98 * lam / r0) * 3600
+
+    def test_seeing_J_inverse_pair(self):
+        import keck_ao_estimator as engine
+        for eps in (0.15, 0.5, 0.97, 2.4):
+            J = engine.seeing_to_integrated_cn2(eps)
+            assert abs(self._eps_of_J(J) - eps) < 1e-9
+            assert abs(engine.integrated_cn2_to_seeing(J) - eps) < 1e-9
+        assert engine.integrated_cn2_to_seeing(0.0) == 0.0
+
+    def test_layers_combine_as_five_thirds_power_sum(self):
+        import keck_ao_estimator as engine
+        eps = [0.30, 0.10, 0.05, 0.05, 0.12, 0.25, 0.14]
+        J = [engine.layer_from_seeing(e) for e in eps]
+        got = engine.layers_seeing(J)
+        want_tot = sum(e ** (5 / 3) for e in eps) ** (3 / 5)
+        want_fa = sum(e ** (5 / 3) for e in eps[1:]) ** (3 / 5)
+        assert abs(got["eps_tot"] - want_tot) < 1e-9
+        assert abs(got["eps_fa"] - want_fa) < 1e-9
+        assert abs(got["eps_ground"] - eps[0]) < 1e-9
+        assert want_tot < sum(eps), "a plain sum would overstate the seeing"
+
+    def test_reconstructor_prior_scaled_to_total_seeing(self):
+        import keck_ao_estimator as engine
+        frac = engine.RECON_PRIOR_FRAC
+        assert abs(frac.sum() - 1.0) < 1e-3               # KAON 1542 table
+        J = engine.recon_prior_layers(0.62)
+        got = engine.layers_seeing(J)
+        assert abs(got["eps_tot"] - 0.62) < 1e-9
+        # the aloft share of the integrated turbulence sets the free-atm
+        # seeing through the same 3/5 power
+        assert abs(got["eps_fa"] - 0.62 * frac[1:].sum() ** (3 / 5)) < 1e-9
+        assert engine.layer_mismatch(J[1:]) < 1e-12
+        assert np.allclose(engine.RECON_HEIGHTS_M[1:], engine.MASS_HEIGHTS_M)
+
+    def test_fractions_are_proportions_at_a_fixed_total(self):
+        import keck_ao_estimator as engine
+        f = np.array([0.5, 0.1, 0.05, 0.05, 0.1, 0.1, 0.1])
+        J = engine.fractions_to_layers(f, 0.7)
+        got = engine.layers_seeing(J)
+        assert abs(got["eps_tot"] - 0.7) < 1e-9
+        # free-atm from the aloft share through the 3/5 power
+        assert abs(got["eps_fa"] - 0.7 * f[1:].sum() ** (3 / 5)) < 1e-9
+        # a sum below 1 is normalized: same layers, same seeing
+        assert np.allclose(engine.fractions_to_layers(0.4 * f, 0.7), J)
+        assert not engine.fractions_to_layers(np.zeros(7), 0.7).any()
+
+    def test_snapshot_from_layers_uses_them_verbatim(self):
+        import keck_ao_estimator as engine
+        J = engine.recon_prior_layers(0.5)
+        s = engine.synthetic_field_snapshot(1.5, 1.0, cn2_layers=J)
+        assert abs(s["eps_tot_zenith"] - 0.5) < 1e-9        # pair ignored
+        assert np.allclose(s["cn2_bins"], J[1:])
+        th = engine.theta0_d0_from_profile(J[1:], 0.0, engine.LAMBDA_K_NM)[0]
+        assert abs(s["theta0_k_zenith"] - th) < 1e-9
+        assert math.isnan(s["alpha"]) and s["m"] < 1e-12
+        # and the two-number path is exactly what it was
+        s0 = engine.synthetic_field_snapshot(0.5, 0.3)
+        assert s0["cn2_layers"] is None and s0["alpha"] == 0.0
