@@ -13,7 +13,7 @@ from matplotlib.legend_handler import HandlerBase
 from matplotlib.patches import Rectangle
 
 from . import budget
-from .budget import DEF_LGS_OFFSET, STATIC_TEL, static_subtotal
+from .budget import STATIC_TEL, static_subtotal
 from .constants import LAMBDA_K_NM, POINTING_LIMITS, TEL_DIAMETER_M
 from .geometry import compute_airmass_curve, pointing_state
 

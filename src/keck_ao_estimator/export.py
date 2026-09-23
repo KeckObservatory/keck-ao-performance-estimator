@@ -7,7 +7,7 @@ from datetime import timedelta
 import numpy as np
 
 from . import budget
-from .budget import DEF_LGS_OFFSET, STATIC_TEL, active_budget_overrides, static_subtotal
+from .budget import STATIC_TEL, active_budget_overrides, static_subtotal
 from .constants import (
     DM_ACTUATORS_ACROSS, HST_TO_UTC_HOURS, MOFFAT_BETA_KOLM, TEL_DIAMETER_M,
     V_FREE, V_GROUND,
