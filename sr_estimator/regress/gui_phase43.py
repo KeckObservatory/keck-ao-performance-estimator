@@ -230,15 +230,23 @@ def main():
     assert not win.n2_watch.isEnabled()
     assert "UNAVAILABLE" in win.n2_watch.toolTip() \
         and "x:22" in win.n2_watch.toolTip()
-    assert "not on the Keck network (summit servers not reachable" \
-        in win.n2_log.toPlainText()
+    assert "auto-measure unavailable: Keck network lost (summit servers " \
+        "not reachable" in win.n2_log.toPlainText()
     win.n2_watch.setChecked(True)          # programmatic: still refused
     assert not win.n2_watch.isChecked() and win._n2_watcher is None
     win._nirc2_on_network(True, "reached k2aoserver-new:22")
     assert win.n2_watch.isEnabled()
     assert "auto-measure available" in win.n2_log.toPlainText()
+    win._nirc2_on_network(False, "summit servers not reachable (x:22)")
+    n_log = len(win.n2_log.toPlainText())     # after the (logged) transition
+    win._nirc2_on_network(False, "summit servers not reachable (x:22)")
+    assert len(win.n2_log.toPlainText()) == n_log, \
+        "a repeated negative answer must not log (off-site start-up is " \
+        "silent: an async log line broke gui_phase41 on CI)"
+    win._nirc2_on_network(True, "reached k2aoserver-new:22")
     print("  [ok] Keck-network gate: greyed + reason off-network, enabled "
-          "on it, refused programmatically while greyed")
+          "on it, refused programmatically while greyed; only transitions "
+          "are logged")
 
     # ---- refuses without a directory ---------------------------------------
     win.n2_path.setText("")

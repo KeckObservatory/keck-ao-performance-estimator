@@ -940,14 +940,18 @@ class Nirc2StrehlTabMixin:
                     f"Keck network reachable ({reason}): auto-measure "
                     "available")
             return
+        # the log records TRANSITIONS only: the start-up answer arrives
+        # asynchronously (seconds later off-site), and a line landing at an
+        # arbitrary point in the measurement log broke gui_phase41's
+        # byte-for-byte log comparison on off-site CI (v1.2.2); the
+        # greyed checkbox's tooltip carries the reason instead
         if self.n2_watch.isChecked():
             self.n2_watch.setChecked(False)
             self.n2_log.appendPlainText(
                 f"auto-measure stopped: Keck network lost ({reason})")
-        elif was is not False:
+        elif was is True:
             self.n2_log.appendPlainText(
-                f"auto-measure unavailable: not on the Keck network "
-                f"({reason})")
+                f"auto-measure unavailable: Keck network lost ({reason})")
 
     def _nirc2_confirm_rsync(self, host, rdir):
         """Ask before polling an operations server (Eduardo 2026-09-22).
