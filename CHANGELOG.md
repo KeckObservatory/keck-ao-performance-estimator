@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.2.2` in the install URL).
+is released on GitHub only (pin `@v1.3.0` in the install URL).
 
-## Unreleased
+## 1.3.0 — 2026-09-22
 
 ### Added
 - LGS tab: **LGS flux** sub-tab with an option to **scale the measurement
