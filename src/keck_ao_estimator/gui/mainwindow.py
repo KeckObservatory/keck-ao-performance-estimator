@@ -1086,7 +1086,11 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             "fm_catalog": self.fm_catalog.currentText(),
             "dark_theme": self.dark_action.isChecked(),
             "nirc2": {
+                "instrument": self.n2_instrument.currentText(),
                 "path": self.n2_path.text(),
+                "instrument_paths": {**self._n2_inst_paths,
+                                     self.n2_instrument.currentText():
+                                         self.n2_path.text()},
                 "im1": self.n2_im1.value(), "nim": self.n2_nim.value(),
                 "bg1": self.n2_bg1.value(), "nbg": self.n2_nbg.value(),
                 "autofind": self.n2_autofind.isChecked(),
@@ -1247,6 +1251,8 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             # a config's value counts as a user choice (_dark_auto stays off).
             self.dark_action.setChecked(c.get("dark_theme", False))
             n2 = c.get("nirc2", {})
+            self.n2_instrument.setCurrentText(n2.get("instrument", "NIRC2"))
+            self._n2_inst_paths.update(n2.get("instrument_paths", {}))
             self.n2_path.setText(n2.get("path", ""))
             self.n2_im1.setValue(int(n2.get("im1", 1)))
             self.n2_nim.setValue(int(n2.get("nim", 1)))

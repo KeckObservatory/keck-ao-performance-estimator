@@ -15,9 +15,13 @@ readouts against the loaded estimate, OBJECT/RA/Dec -> target wiring,
 crowded-field mitigations (robust sky, pick-sky, CROWDED/UNPHYSICAL
 warnings), the live pick-zoom magnifier, and instrument-agnostic display
 stretches (display-only, never the measurement).  Measurement runs on a
-worker thread (Nirc2MeasureWorker), one result line per frame.  AUTO
-UPDATE IMAGE (summit file watching) remains out of scope until an
-inside-firewall deployment.
+worker thread (Nirc2MeasureWorker), one result line per frame.  "Auto-
+measure new frames" is the IDL tool's autoimage: FrameWatchWorker polls
+PATH once a second and each new complete frame (NIRC2 n####.fits or
+OSIRIS imager i<YYMMDD>_a######.fits) is measured as it lands; "Latest"
+points PATH at tonight's NIRC2 directory on the NFS-mounted /s/sdata9NN
+disks (frame_watch.find_latest_night_dir -- the summit tool's KTL
+`runname` lookup is not available off the summit hosts).
 """
 import numpy as np
 import matplotlib.patheffects as patheffects
@@ -31,8 +35,9 @@ import keck_ao_estimator as engine
 from ..theme import set_cue
 from ..widgets import SortableItem, _dspin, _shrinkable_label
 from ..workers import (CatalogFetchWorker, FieldMeasureWorker,
-                       FieldPrologueWorker, NativeFilenameWorker,
-                       Nirc2MeasureWorker)
+                       FieldPrologueWorker, FrameWatchWorker,
+                       KeckNetworkCheck, LatestNightWorker,
+                       NativeFilenameWorker, Nirc2MeasureWorker)
 from .starlist_picker import _starlist_entry_mags
 
 # field-map annotation text over the new image background needs a halo to
@@ -118,9 +123,48 @@ class Nirc2StrehlTabMixin:
         browse = QtWidgets.QPushButton("…")
         browse.setFixedWidth(28)
         browse.clicked.connect(self._on_nirc2_browse)
+        self.n2_latest = QtWidgets.QPushButton("Latest")
+        self.n2_latest.setToolTip(
+            "Point PATH at tonight's directory for the selected "
+            "instrument (the summit tool's KTL lookup is not available "
+            "off the summit).\n"
+            "NIRC2: searches every account on the NFS-mounted NIRC2 "
+            "disks (/s/sdata900-907) -- local, about a second.\n"
+            "OSIRIS: its disk does not mount here, so this LISTS the AO "
+            "server (k2ao:/s/sdata1100) over rsync -- a one-off, 2 to "
+            "20 s; nothing is polled until Auto-measure is switched on.\n"
+            "Picks the latest-dated night (between accounts, the one "
+            "written to last); when tonight's directory does not exist "
+            "yet it picks the most recent night and says so.")
+        self.n2_latest.clicked.connect(self._on_nirc2_latest)
         path_row.addWidget(self.n2_path, 1)
         path_row.addWidget(browse)
         form.addRow("Path:", self._wrap(path_row))
+        # NIRC2 and OSIRIS can both be in use on one night: the choice
+        # sets which frames auto-measure looks for, where Latest searches,
+        # and which PATH is shown (each instrument remembers its own)
+        self.n2_instrument = QtWidgets.QComboBox()
+        self.n2_instrument.addItems(["NIRC2", "OSIRIS"])
+        self.n2_instrument.setToolTip(
+            "Which instrument's frames to look for. Auto-measure only "
+            "picks up this instrument's frames (NIRC2 n####.fits, OSIRIS "
+            "imager i<YYMMDD>_a######.fits) and Latest searches its "
+            "disks. PATH is remembered per instrument, so switching "
+            "flips between tonight's NIRC2 and OSIRIS directories. "
+            "Switching stops Auto-measure (switch it on again for the "
+            "other instrument).")
+        self._n2_inst_paths = {"NIRC2": "", "OSIRIS": ""}
+        self._n2_inst_current = "NIRC2"
+        self.n2_instrument.currentTextChanged.connect(
+            self._on_nirc2_instrument)
+        # a spanning row: in the field column (beside the form's widest
+        # label) the combo and Latest were squeezed below their size
+        inst_row = QtWidgets.QHBoxLayout()
+        inst_row.addWidget(QtWidgets.QLabel("Instrument:"))
+        inst_row.addWidget(self.n2_instrument)
+        inst_row.addStretch(1)
+        inst_row.addWidget(self.n2_latest)
+        form.addRow(self._wrap(inst_row))
 
         self.n2_im1 = QtWidgets.QSpinBox()
         self.n2_im1.setRange(0, 9999)
@@ -159,6 +203,38 @@ class Nirc2StrehlTabMixin:
             "OFF: after Measure, click the star in the image — a live "
             "magnifier follows the cursor.")
         form.addRow("", self.n2_autofind)
+        self.n2_watch = QtWidgets.QCheckBox("Auto-measure new frames")
+        self.n2_watch.setToolTip(
+            "The IDL tool's 'find the Strehl of the last image "
+            "automatically': PATH is checked once a second and each new "
+            "frame of the selected instrument is measured as soon as it "
+            "is completely written, with the settings on this page. The "
+            "current last frame is measured when this is switched on. A "
+            "frame that lands while a measurement, 'Measure field' or a "
+            "question is still open waits; if a newer one lands too, "
+            "only the newest is measured and the log names the skipped "
+            "one. Never saved in a config (a loaded config must not "
+            "start polling).\n"
+            "A REMOTE PATH (host:/dir, e.g. OSIRIS via k2ao) is polled "
+            "by RSYNC over ssh every 3 s and each new frame copied to a "
+            "local cache: you are asked first, and a red banner above "
+            "the image plus the tab title say so for as long as it runs.\n"
+            "Only available on the Keck network (greyed out elsewhere).")
+        self.n2_watch.toggled.connect(self._on_nirc2_watch_toggled)
+        # polling is only offered on the Keck network (Eduardo
+        # 2026-09-22): greyed until keck_network_check says so, re-checked
+        # whenever this tab is shown -- see _nirc2_on_network
+        self._n2_watch_tip = self.n2_watch.toolTip()
+        self._n2_on_keck = None
+        self._n2_net_check = None
+        self._n2_watcher = None
+        self._n2_watch_pending = None
+        self.n2_watch.setEnabled(False)
+        self.n2_watch.setToolTip(
+            self._n2_watch_tip + "\n\nChecking whether this machine is on "
+            "the Keck network ...")
+        self.n2_path.textChanged.connect(self._nirc2_watch_path_changed)
+        form.addRow(self.n2_watch)
         left.addWidget(gb_frames)
 
         gb_phot = QtWidgets.QGroupBox("Photometry")
@@ -403,6 +479,13 @@ class Nirc2StrehlTabMixin:
         stretch_row.addWidget(QtWidgets.QLabel("White:"))
         stretch_row.addWidget(self.n2_white)
         stretch_row.addStretch(1)
+        # rsync polling of an operations server must never be silent
+        # (Eduardo 2026-09-22): shown whenever PATH is remote, red while
+        # polling -- here, above the image, where the eye is
+        self.n2_rsync_flag = QtWidgets.QLabel()
+        self.n2_rsync_flag.setVisible(False)
+        self.n2_rsync_flag.setStyleSheet("QLabel { font-weight: bold; }")
+        stretch_row.addWidget(self.n2_rsync_flag)
         right.addLayout(stretch_row)
 
         self.n2_fig = Figure(figsize=(4.6, 4.2), layout="constrained")
@@ -694,6 +777,9 @@ class Nirc2StrehlTabMixin:
         self._n2_field_redraw_timer = QtCore.QTimer(self)
         self._n2_field_redraw_timer.setSingleShot(True)
         self._n2_field_redraw_timer.timeout.connect(self._nirc2_draw_map)
+        self._n2_tab_page = w          # for the "rsync" tab-title flag
+        self.plot_tabs.currentChanged.connect(self._nirc2_tab_shown)
+        self._nirc2_check_network()
         return w
 
     # ---- handlers ----------------------------------------------------------
@@ -703,10 +789,18 @@ class Nirc2StrehlTabMixin:
         if d:
             self.n2_path.setText(d)      # textChanged refreshes the file list
 
+    def _nirc2_frames_dir(self):
+        """Where frames are READ from: PATH itself, or for a remote PATH
+        (host:/dir) the local cache its frames are copied into."""
+        from ...frame_watch import remote_cache_dir, split_remote
+        path = self.n2_path.text().strip()
+        remote = split_remote(path)
+        return remote_cache_dir(*remote) if remote else path
+
     def _nirc2_refresh_files(self):
         import os
         self.n2_files.clear()
-        d = self.n2_path.text().strip()
+        d = self._nirc2_frames_dir()
         if not os.path.isdir(d):
             return
         try:
@@ -766,9 +860,259 @@ class Nirc2StrehlTabMixin:
             return
         # any other FITS (KOA exports etc.): measure this one file directly;
         # the worker refuses non-NIRC2 instruments by header with a log line
-        path = self.n2_path.text().strip()
+        path = self._nirc2_frames_dir()
         label = os.path.splitext(item.text())[0]   # native name if shown
         self._nirc2_start(files=[(label, os.path.join(path, disk_name))])
+
+    # ---- auto-measure: the IDL tool's autoimage timer ---------------------
+    def _nirc2_kind(self):
+        return self.n2_instrument.currentText().lower()   # nirc2 / osiris
+
+    def _on_nirc2_instrument(self, text):
+        old = self._n2_inst_current
+        self._n2_inst_paths[old] = self.n2_path.text()
+        self._n2_inst_current = text
+        if self.n2_watch.isChecked():
+            self.n2_watch.setChecked(False)     # never carry polling over
+        self.n2_path.setText(self._n2_inst_paths.get(text, ""))
+        self.n2_log.appendPlainText(f"instrument -> {text}")
+
+    def _on_nirc2_latest(self):
+        kind = self._nirc2_kind()
+        self.n2_latest.setEnabled(False)
+        self.n2_instrument.setEnabled(False)   # the answer is for this one
+        self.n2_log.appendPlainText(
+            "searching k2ao:/s/sdata1100 for tonight's OSIRIS directory "
+            "(one-off rsync listing, 2-20 s) ..." if kind == "osiris" else
+            "searching the /s NIRC2 disks for tonight's directory ...")
+        self._n2_latest_worker = LatestNightWorker(kind, parent=self)
+        self._n2_latest_worker.done.connect(self._on_nirc2_latest_done)
+        self._n2_latest_worker.start()
+
+    def _on_nirc2_latest_done(self, path, tonight, error):
+        self.n2_latest.setEnabled(True)
+        self.n2_instrument.setEnabled(True)
+        inst = self.n2_instrument.currentText()
+        if error:
+            self.n2_log.appendPlainText(f"! Latest ({inst}) failed: {error}")
+            return
+        if not path:
+            self.n2_log.appendPlainText(
+                "! no NIRC2 night directory found under /s/sdata900-907 "
+                "(disks not mounted on this machine?)" if inst == "NIRC2"
+                else "! no OSIRIS night directory found on k2ao:/s/sdata1100")
+            return
+        self.n2_path.setText(path)
+        self.n2_log.appendPlainText(
+            f"PATH ({inst}) -> {path}" + ("" if tonight else
+                                          "  (no directory for tonight's UT "
+                                          "date yet: this is the most "
+                                          "recent night)"))
+
+    def _nirc2_tab_shown(self, index):
+        if index == self.plot_tabs.indexOf(self._n2_tab_page):
+            self._nirc2_check_network()     # e.g. the VPN came up since
+
+    def _nirc2_check_network(self):
+        if self._n2_net_check is not None:
+            return                          # one in flight already
+        self._n2_net_check = KeckNetworkCheck(self)
+        self._n2_net_check.done.connect(self._nirc2_on_network)
+        self._n2_net_check.start()
+
+    def _nirc2_on_network(self, ok, reason):
+        """Enable auto-measure polling only on the Keck network: it reads
+        the summit data disks and the AO server (keck_network). Losing the
+        network while polling stops it."""
+        self._n2_net_check = None
+        was = self._n2_on_keck
+        self._n2_on_keck = ok
+        self.n2_watch.setEnabled(ok)
+        self.n2_watch.setToolTip(self._n2_watch_tip if ok else (
+            self._n2_watch_tip + "\n\nUNAVAILABLE: this machine is not on "
+            f"the Keck network ({reason}). Polling reads the summit data "
+            "disks and the AO server, so it is only offered inside the "
+            "network or on the VPN; re-checked each time this tab is "
+            "shown."))
+        if ok:
+            if was is False:
+                self.n2_log.appendPlainText(
+                    f"Keck network reachable ({reason}): auto-measure "
+                    "available")
+            return
+        if self.n2_watch.isChecked():
+            self.n2_watch.setChecked(False)
+            self.n2_log.appendPlainText(
+                f"auto-measure stopped: Keck network lost ({reason})")
+        elif was is not False:
+            self.n2_log.appendPlainText(
+                f"auto-measure unavailable: not on the Keck network "
+                f"({reason})")
+
+    def _nirc2_confirm_rsync(self, host, rdir):
+        """Ask before polling an operations server (Eduardo 2026-09-22).
+        Tests stub this."""
+        from ...frame_watch import REMOTE_POLL_S
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setWindowTitle("Poll by rsync?")
+        box.setText(f"PATH is remote: {host}:{rdir}")
+        box.setInformativeText(
+            f"Auto-measure will list it with rsync over ssh every "
+            f"{REMOTE_POLL_S:.0f} s for as long as it is on, and copy each "
+            f"new frame to this machine. {host} is an operations server.\n\n"
+            "Start rsync polling?")
+        box.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes
+                               | QtWidgets.QMessageBox.StandardButton.No)
+        box.setDefaultButton(QtWidgets.QMessageBox.StandardButton.No)
+        return box.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def _nirc2_watch_untick(self):
+        self.n2_watch.blockSignals(True)
+        self.n2_watch.setChecked(False)
+        self.n2_watch.blockSignals(False)
+
+    def _on_nirc2_watch_toggled(self, on):
+        import os
+        from ...frame_watch import REMOTE_POLL_S, split_remote
+        if not on:
+            self._nirc2_watch_stop()
+            self.n2_log.appendPlainText("auto-measure off")
+            return
+        if not self._n2_on_keck:            # greyed out, but belt and braces
+            self.n2_log.appendPlainText(
+                "! auto-measure is only available on the Keck network")
+            self._nirc2_watch_untick()
+            return
+        path = self.n2_path.text().strip()
+        remote = split_remote(path)
+        if remote is None and not os.path.isdir(path):
+            self.n2_log.appendPlainText(
+                "! auto-measure needs PATH set to a frame directory "
+                "(or press Latest)")
+            self._nirc2_watch_untick()
+            return
+        if remote is not None and not self._nirc2_confirm_rsync(*remote):
+            self.n2_log.appendPlainText("auto-measure: rsync polling declined")
+            self._nirc2_watch_untick()
+            return
+        self._n2_watch_pending = None
+        self._n2_watcher = FrameWatchWorker(path, kind=self._nirc2_kind(),
+                                            parent=self)
+        self._n2_watcher.new_frame.connect(self._on_nirc2_new_frame)
+        self._n2_watcher.status.connect(
+            lambda m: self.n2_log.appendPlainText(f"auto-measure: {m}"))
+        QtWidgets.QApplication.instance().aboutToQuit.connect(
+            self._nirc2_watch_stop)
+        self._n2_watcher.start()
+        inst = self.n2_instrument.currentText()
+        self.n2_log.appendPlainText(
+            f"auto-measure ({inst}): watching {path}" if remote is None else
+            f"auto-measure ({inst}): POLLING {path} BY RSYNC every "
+            f"{REMOTE_POLL_S:.0f} s; frames copied to "
+            f"{self._nirc2_frames_dir()}")
+        self._nirc2_update_rsync_flag()
+
+    def _nirc2_watch_stop(self):
+        w = getattr(self, "_n2_watcher", None)
+        self._n2_watcher = None
+        self._n2_watch_pending = None
+        if w is not None:
+            w.request_stop()
+            # a stalled NFS stat / rsync call must not hang the GUI: rsync
+            # carries its own timeout, so an abandoned thread still ends
+            w.wait(2000)
+        self._nirc2_update_rsync_flag()
+
+    def _nirc2_watch_path_changed(self, text):
+        from ...frame_watch import split_remote
+        w = getattr(self, "_n2_watcher", None)
+        if w is not None:
+            if split_remote(text) is not None or split_remote(
+                    getattr(self, "_n2_watch_path", "")) is not None:
+                # a new remote target needs its own confirmation, and
+                # leaving one must visibly end its polling
+                self.n2_watch.setChecked(False)
+                self.n2_log.appendPlainText(
+                    "auto-measure stopped: PATH changed to/from a remote "
+                    "(rsync) directory -- switch it on again to confirm")
+            else:
+                w.set_path(text.strip())
+                self._n2_watch_pending = None
+        self._n2_watch_path = text.strip()
+        self._nirc2_update_rsync_flag()
+
+    def _nirc2_update_rsync_flag(self):
+        """The rsync banner above the image and the tab-title tag: red
+        while rsync polling runs, amber while PATH is remote but idle,
+        hidden otherwise."""
+        from ...frame_watch import REMOTE_POLL_S, split_remote
+        remote = split_remote(self.n2_path.text())
+        polling = remote is not None and getattr(
+            self, "_n2_watcher", None) is not None
+        if polling:
+            self.n2_rsync_flag.setText(
+                f"⚠ RSYNC POLLING {remote[0]} every {REMOTE_POLL_S:.0f} s")
+            set_cue(self.n2_rsync_flag, "err")
+        elif remote is not None:
+            self.n2_rsync_flag.setText(
+                f"remote PATH ({remote[0]}, rsync) — not polling")
+            set_cue(self.n2_rsync_flag, "warn")
+        self.n2_rsync_flag.setToolTip(
+            f"PATH {remote[0]}:{remote[1]} is read with rsync over ssh; "
+            f"frames are copied to {self._nirc2_frames_dir()}"
+            if remote else "")
+        self.n2_rsync_flag.setVisible(remote is not None)
+        page = getattr(self, "_n2_tab_page", None)
+        if page is not None:
+            idx = self.plot_tabs.indexOf(page)
+            if idx >= 0:
+                self.plot_tabs.setTabText(
+                    idx, "Measured SR ⚠ rsync" if polling else "Measured SR")
+
+    def _on_nirc2_new_frame(self, fpath):
+        import os
+        # a watcher stopped or re-pointed while this was queued
+        if (self.sender() is not getattr(self, "_n2_watcher", None)
+                or os.path.dirname(fpath) != os.path.normpath(
+                    self._nirc2_frames_dir())):
+            return
+        self._nirc2_refresh_files()       # the new frame joins the list
+        prev = getattr(self, "_n2_watch_pending", None)
+        if prev is not None:
+            self.n2_log.appendPlainText(
+                f"auto-measure: skipped {os.path.basename(prev)} -- "
+                f"{os.path.basename(fpath)} landed while busy")
+        self._n2_watch_pending = fpath
+        self._nirc2_watch_drain()
+
+    def _nirc2_watch_busy(self):
+        # Measure stays disabled from _nirc2_start through the guide-star
+        # prefetch and the whole run (duplicate dialogs included)
+        return (not self.n2_go.isEnabled()
+                or getattr(self, "_n2_field_busy", False)
+                or getattr(self, "_n2_dup_dialog_open", False))
+
+    def _nirc2_watch_drain(self):
+        """Measure the pending new frame once nothing else is running;
+        called on arrival and again whenever a measurement or a field run
+        ends."""
+        import os
+        from ...frame_watch import nirc2_frame_number
+        fpath = getattr(self, "_n2_watch_pending", None)
+        if (fpath is None or getattr(self, "_n2_watcher", None) is None
+                or self._nirc2_watch_busy()):
+            return
+        self._n2_watch_pending = None
+        name = os.path.basename(fpath)
+        self.n2_log.appendPlainText(f"auto-measure: new frame {name}")
+        no = nirc2_frame_number(name)
+        if no is not None:      # summit-numbered: drive FIRST IMAGE, as
+            self.n2_im1.setValue(no)        # a double-click does
+            self.n2_nim.setValue(1)
+            self._nirc2_start()
+        else:                   # OSIRIS imager: measure this one file
+            self._nirc2_start(files=[(os.path.splitext(name)[0], fpath)])
 
     def _nirc2_radii(self):
         return (self.n2_photrad.value(), self.n2_bgin.value(),
@@ -808,7 +1152,7 @@ class Nirc2StrehlTabMixin:
         if self._n2_worker is not None and self._n2_worker.isRunning():
             self.n2_log.appendPlainText("! measurement already running")
             return
-        path = self.n2_path.text().strip()
+        path = self._nirc2_frames_dir()
         if not path:
             self.n2_log.appendPlainText(
                 "! set the PATH to a directory of NIRC2 frames")
@@ -872,6 +1216,9 @@ class Nirc2StrehlTabMixin:
         self._n2_worker.frame_done.connect(self._on_nirc2_frame_done)
         self._n2_worker.frame_failed.connect(self._on_nirc2_frame_failed)
         self._n2_worker.finished_all.connect(self._on_nirc2_finished)
+        # QThread.finished, not finished_all: isRunning() is already False
+        # here, so a frame that landed mid-run can start straight away
+        self._n2_worker.finished.connect(self._nirc2_watch_drain)
         self._n2_worker.start()
 
     def _on_nirc2_frame_done(self, imno, result, params, reduced, dl,
@@ -1546,6 +1893,9 @@ class Nirc2StrehlTabMixin:
         self._n2_field_busy = False
         self.n2_field_btn.setEnabled(True)
         self.n2_field_btn.setText("Measure field")
+        # a frame that landed during the field run: measured after the
+        # summary lines below, not before them
+        QtCore.QTimer.singleShot(0, self._nirc2_watch_drain)
         # a coalesced redraw (_nirc2_field_request_redraw) may still be
         # pending -- stop it here so it cannot fire late against
         # whatever this tab does next (a new frame, a new field run);
@@ -3537,6 +3887,8 @@ class Nirc2StrehlTabMixin:
             self._n2_dup_dialog_open = False
             if running:
                 worker.resume()
+            # a new frame that landed while the question was open
+            QtCore.QTimer.singleShot(0, self._nirc2_watch_drain)
         # NOTE: draining the in-flight queue is deliberately NOT done here.
         # This method is itself called FROM the drain loop, so draining here
         # too would make the two mutually recursive. The top-level caller

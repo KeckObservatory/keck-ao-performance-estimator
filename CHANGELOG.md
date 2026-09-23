@@ -1,7 +1,41 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.2.1` in the install URL).
+is released on GitHub only (pin `@v1.2.2` in the install URL).
+
+## 1.2.2 — 2026-09-22
+
+### Added
+- Measured SR tab: **Auto-measure new frames**, the summit IDL Strehl
+  tool's "find the Strehl of the last image automatically". PATH is
+  polled off the GUI thread and each new, completely written frame of the
+  selected instrument is measured with the page's settings; the current
+  last frame is measured on switch-on. A frame landing mid-measurement or
+  mid-"Measure field" waits; if a newer one lands too, only the newest is
+  measured and the log names the skipped one. Not saved in configs.
+- Measured SR tab: **Instrument** selector (NIRC2 / OSIRIS; both can be in
+  use on one night). It sets which frames are looked for (NIRC2
+  `n####.fits`, OSIRIS imager `i<YYMMDD>_a######.fits`) and where Latest
+  searches, and each instrument remembers its own PATH (saved in configs).
+  Switching instrument stops Auto-measure.
+- Measured SR tab: **Latest** points PATH at tonight's directory — NIRC2
+  on the NFS-mounted `/s/sdata900`–`907` disks (any account), OSIRIS on
+  the AO server's `/s/sdata1100` via a one-off rsync listing. It says so
+  when tonight's directory does not exist yet and the most recent night
+  was picked.
+- **Remote PATH** (`host:/dir`, e.g. `k2ao:/s/sdata1100/...`): read with
+  rsync over ssh (listed every 3 s, new frames copied to
+  `~/.cache/keck-ao-estimator/remote_frames`, newest 20 kept). Starting
+  it asks for confirmation; while it runs a red "RSYNC POLLING" banner
+  sits above the image and the tab reads "Measured SR ⚠ rsync". Any PATH
+  change to or from a remote directory stops it.
+- Auto-measure is **only available on the Keck network**: the checkbox is
+  greyed out (reason in its tooltip) unless this machine can open a TCP
+  connection to the AO server's ssh or the NIRC2 data server's NFS port —
+  DNS is no test, keck.hawaii.edu names resolve publicly. Checked in the
+  background at start-up and each time the tab is shown; losing the
+  network while polling stops it. `KECK_AO_KECK_NETWORK=1/0` forces the
+  answer. Engine: `keck_network.py`. Regress `gui_phase43`.
 
 ## 1.2.1 — 2026-09-15
 

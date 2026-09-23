@@ -12,7 +12,11 @@ through keck_ao_estimator.parallel.MeasureBatch so workers > 1 genuinely
 parallelizes it, exactly the machinery measure_field() itself uses
 internally). Together these two remove every processEvents() call from the
 Measure-field flow (parallel PR-CP3); Nirc2MeasureWorker (the Run sequence)
-already had none.
+already had none. FrameWatchWorker polls the night's frame directory for the
+Measured SR tab's auto-measure (the IDL tool's autoimage timer; rsync for a
+remote PATH), and LatestNightWorker finds tonight's NIRC2 (local /s disks)
+or OSIRIS (AO server, rsync) directory; KeckNetworkCheck gates the polling
+to machines on the Keck network.
 """
 import contextlib
 import io
@@ -367,6 +371,142 @@ class Nirc2MeasureWorker(QThread):
             except Exception as e:
                 self.frame_failed.emit(no, f"{type(e).__name__}: {e}")
         self.finished_all.emit()
+
+
+class FrameWatchWorker(QThread):
+    """The IDL Strehl tool's autoimage timer: polls a frame directory and
+    emits new_frame(local_path) once the last frame of instrument `kind`
+    ("nirc2": n####.fits, "osiris": i<YYMMDD>_a######.fits) by name is
+    complete (frame_watch.frame_ready: whole FITS blocks, size unchanged
+    since the previous poll). The first complete frame seen is emitted
+    too -- the IDL tool also measures the current last image as soon as
+    autoimage is switched on.
+
+    A local PATH is polled every `interval_s`. A REMOTE one
+    (``host:/abs/dir``, frame_watch.split_remote) is listed with rsync
+    every frame_watch.REMOTE_POLL_S and each new frame is copied into
+    frame_watch.remote_cache_dir before being emitted; listing/copy
+    failures and recoveries go out as status(message), once per change.
+
+    Runs off the GUI thread: the /s data disks are NFS hard mounts and
+    rsync goes over ssh, so a stall blocks this thread, never the GUI.
+    set_path() re-targets a running watcher (and forgets what it had
+    emitted); request_stop() ends it within ~0.1 s of its current poll
+    (or of the rsync call in flight, which carries its own timeout)."""
+    new_frame = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, path, kind=None, interval_s=1.0, parent=None):
+        super().__init__(parent)
+        self._lock = threading.Lock()
+        self._path = path
+        self.kind = kind
+        self._interval_ms = int(interval_s * 1000)
+        self._stop = False
+
+    def set_path(self, path):
+        with self._lock:
+            self._path = path
+
+    def request_stop(self):
+        self._stop = True
+
+    def run(self):
+        from ..frame_watch import (REMOTE_POLL_S, frame_ready, newest_frame,
+                                   prune_cache, remote_cache_dir,
+                                   remote_fetch, remote_newest_frame,
+                                   split_remote)
+
+        watched, emitted, pending, error = None, None, None, None
+        while not self._stop:
+            with self._lock:
+                path = self._path
+            if path != watched:
+                watched, emitted, pending, error = path, None, None, None
+            remote = split_remote(path)
+            nf = None
+            try:
+                if remote is not None:
+                    nf = remote_newest_frame(*remote, kind=self.kind)
+                elif path:
+                    nf = newest_frame(path, self.kind)
+                if error is not None:
+                    self.status.emit("rsync listing OK again")
+                    error = None
+            except OSError as e:
+                msg = f"rsync listing failed: {e}"
+                if msg != error:
+                    self.status.emit(msg)
+                    error = msg
+            if nf is not None and (emitted is None or nf[0] > emitted):
+                name, full, size = nf
+                prev = pending[1] if pending and pending[0] == name else None
+                pending = (name, size)
+                if frame_ready(size, prev):
+                    try:
+                        if remote is not None:
+                            cache = remote_cache_dir(*remote)
+                            full = remote_fetch(remote[0], full, cache)
+                            prune_cache(cache)
+                        emitted, pending = name, None
+                        if not self._stop:
+                            self.new_frame.emit(full)
+                    except OSError as e:     # retried on the next poll
+                        self.status.emit(
+                            f"rsync copy of {name} failed: {e} -- retrying")
+            interval_ms = (int(REMOTE_POLL_S * 1000) if remote is not None
+                           else self._interval_ms)
+            for _ in range(max(1, interval_ms // 100)):
+                if self._stop:
+                    break
+                self.msleep(100)
+
+
+class KeckNetworkCheck(QtCore.QObject):
+    """keck_network.keck_network_check on a DAEMON Python thread -- not a
+    QThread: off the Keck network the probes take seconds to time out,
+    and a window closed meanwhile must neither wait for them nor abort on
+    a still-running QThread. Emits done(on_keck_network, reason), queued
+    onto the GUI thread."""
+    done = Signal(bool, str)
+
+    def start(self):
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        from ..keck_network import keck_network_check
+        try:
+            ok, reason = keck_network_check()
+        except Exception as e:
+            ok, reason = False, f"check failed: {type(e).__name__}: {e}"
+        try:
+            self.done.emit(ok, reason)
+        except RuntimeError:        # the window was destroyed meanwhile
+            pass
+
+
+class LatestNightWorker(QThread):
+    """Finds tonight's frame directory off the GUI thread: NIRC2 on the
+    local /s disks (frame_watch.find_latest_night_dir, ~1 s), OSIRIS on
+    the AO server over rsync (find_latest_osiris_night, 2-20 s). Emits
+    done(path_or_empty, is_tonight, error_or_empty)."""
+    done = Signal(str, bool, str)
+
+    def __init__(self, kind, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+
+    def run(self):
+        from .. import frame_watch
+        try:
+            if self.kind == "osiris":
+                path, tonight = frame_watch.find_latest_osiris_night()
+            else:
+                path, tonight = frame_watch.find_latest_night_dir()
+        except Exception as e:
+            self.done.emit("", False, f"{type(e).__name__}: {e}")
+            return
+        self.done.emit(path or "", tonight, "")
 
 
 class FieldPrologueWorker(QThread):
