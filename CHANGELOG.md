@@ -25,6 +25,20 @@ is released on GitHub only (pin `@v1.2.2` in the install URL).
     unchanged. Saved in configs.
 - `--instrument {osiris-imager, osiris-spec, nirc2}` for the LGS-offset
   default (below).
+- Starlist dialog: a **sky plot** beside the table, showing where the
+  selected target sits in Keck's pointing space. It is a polar map, zenith
+  at the centre, N up and E right, and shows:
+  - the selected telescope's pointing limits: the Nasmyth-deck wedge
+    (blocked below its floor), the vignetted band below 18°, the zenith
+    ceiling, and the ring above which guiding is not guaranteed;
+  - the target's path across the night (17:00–08:00 HST; faint in
+    twilight, Sun above −12°), with hour ticks;
+  - the target at the "Evaluate at" time, coloured open / vignetted /
+    blocked;
+  - the Moon, with the dialog's 15° and 30° avoidance circles.
+
+  It redraws on row clicks and time changes. New engine helpers:
+  `night_track`, and `moon_altaz_deg` (topocentric).
 
 ### Changed
 - **LGS offset default: the laser is offset only on K1 with the OSIRIS
@@ -37,7 +51,7 @@ is released on GitHub only (pin `@v1.2.2` in the install URL).
   - Defaults are unchanged for existing runs: K1 without `--instrument` is
     the imager.
 
-Regress `gui_phase44`.
+Regress `gui_phase44`, `gui_phase45`.
 
 ## 1.2.2 — 2026-09-22
 

@@ -77,8 +77,9 @@ from .layers import (
 )
 from .geometry import (
     apply_proper_motion, compute_airmass_curve, hour_angle_hours, in_wedge,
-    is_night_at_keck, moon_illumination_fraction, moon_separation_deg,
-    parse_radec, pointing_state, sun_altitude_deg,
+    is_night_at_keck, moon_altaz_deg, moon_illumination_fraction,
+    moon_separation_deg, night_track, parse_radec, pointing_state,
+    sun_altitude_deg,
 )
 from .gs_ranking import rank_guide_stars
 from .image_strehl import (

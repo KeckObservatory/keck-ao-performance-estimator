@@ -127,6 +127,44 @@ def moon_separation_deg(ra, dec, when_utc=None):
     return float(target.separation(moon).deg)
 
 
+def moon_altaz_deg(when_utc=None):
+    """Topocentric (azimuth, elevation) of the Moon from Keck, degrees, at
+    `when_utc` (a naive UTC datetime; None = now). Topocentric, unlike
+    moon_separation_deg's geocentric position: on a sky plot the Moon's ~1
+    deg parallax is visible."""
+    from datetime import datetime, timezone
+    from astropy.coordinates import get_body
+    if when_utc is None:
+        when_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    keck = EarthLocation(lat=KECK_LAT_DEG * u.deg, lon=KECK_LON_DEG * u.deg,
+                         height=KECK_HEIGHT_M * u.m)
+    t = Time(when_utc)
+    aa = get_body("moon", t, location=keck).transform_to(
+        AltAz(obstime=t, location=keck))
+    return float(aa.az.deg), float(aa.alt.deg)
+
+
+def night_track(ra, dec, when_hst, step_min=10):
+    """The target's path across the night containing `when_hst` (a naive HST
+    datetime): 17:00 HST to 08:00 HST next morning, where the night belongs
+    to when_hst's date if it is after noon, else to the previous date.
+    Returns a dict of arrays: times_hst (datetimes), az, el (deg), and
+    sun_alt (deg; < -12 = dark enough to observe)."""
+    import numpy as np
+    from astropy.coordinates import get_sun
+    d = when_hst.date() if when_hst.hour >= 12 else (when_hst - timedelta(days=1)).date()
+    from datetime import datetime
+    t0 = datetime(d.year, d.month, d.day, 17, 0)
+    times = [t0 + timedelta(minutes=step_min * k) for k in range(int(15 * 60 / step_min) + 1)]
+    am, el, az = compute_airmass_curve(ra, dec, times)
+    keck = EarthLocation(lat=KECK_LAT_DEG * u.deg, lon=KECK_LON_DEG * u.deg,
+                         height=KECK_HEIGHT_M * u.m)
+    tu = Time([t + timedelta(hours=HST_TO_UTC_HOURS) for t in times])
+    sun = get_sun(tu).transform_to(AltAz(obstime=tu, location=keck)).alt.deg
+    return dict(times_hst=times, az=np.asarray(az, float), el=np.asarray(el, float),
+                sun_alt=np.asarray(sun, float))
+
+
 def moon_illumination_fraction(when_utc=None):
     """Illuminated fraction of the Moon's disk at `when_utc` (naive UTC
     datetime; None = now): 0.0 = new moon, 1.0 = full moon. Standard low-

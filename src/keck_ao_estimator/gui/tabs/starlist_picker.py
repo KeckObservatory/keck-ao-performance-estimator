@@ -224,7 +224,7 @@ class StarlistPickerMixin:
             self._starlist_dialog.close()
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"Keck starlist — {fname}")
-        dlg.resize(820, 620)
+        dlg.resize(1180, 640)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.addWidget(QtWidgets.QLabel(
             "Click a row for details (az/el, Moon separation, evaluated at "
@@ -360,7 +360,18 @@ class StarlistPickerMixin:
             lambda row, _col: self._starlist_show_detail(row))
         table.cellDoubleClicked.connect(
             lambda row, _col: self._starlist_pick(row))
-        lay.addWidget(table, 1)
+        # the table and, to its right, a sky plot of the selected target's
+        # place in Keck's pointing space (limits, tonight's path, the Moon)
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        self._starlist_sky_fig = Figure(figsize=(3.6, 4.0))
+        self._starlist_sky_canvas = FigureCanvasQTAgg(self._starlist_sky_fig)
+        self._starlist_sky_canvas.setMinimumWidth(330)
+        self._starlist_sky_canvas.setMinimumHeight(330)
+        split = QtWidgets.QHBoxLayout()
+        split.addWidget(table, 3)
+        split.addWidget(self._starlist_sky_canvas, 2)
+        lay.addLayout(split, 1)
 
         detail_box = QtWidgets.QVBoxLayout()
 
@@ -404,6 +415,7 @@ class StarlistPickerMixin:
         dlg.show()
         self._starlist_dialog = dlg
         self._starlist_table = table
+        self._starlist_draw_sky(None)          # limits + Moon until a row is picked
 
     # Moon-proximity warning thresholds, degrees -- adjust if these don't
     # match observing practice; there's no standing convention elsewhere in
@@ -512,14 +524,53 @@ class StarlistPickerMixin:
             self._starlist_detail_moon.setText(
                 f"Moon separation: unavailable ({ex})")
             set_cue(self._starlist_detail_moon, "secondary")
+        self._starlist_draw_sky(e)
+
+    def _starlist_draw_sky(self, e):
+        """Redraw the dialog's sky plot for entry `e` (None: limits and the
+        Moon only) at the "Evaluate at" time, for the selected telescope.
+        Never raises: a failed astropy computation leaves out that layer."""
+        fig = getattr(self, "_starlist_sky_fig", None)
+        if fig is None:
+            return
+        from ..sky_plot import draw_sky
+        when_hst = getattr(self, "_starlist_eval_dt", None) \
+            or self._starlist_now_hst()
+        when_utc = self._starlist_hst_to_utc(when_hst)
+        is_utc = getattr(self, "_starlist_dialog_is_utc", self._utc())
+        tel = "K1" if self.tel_k1.isChecked() else "K2"
+        track = now = moon = None
+        if e is not None:
+            try:
+                track = engine.night_track(e["ra"], e["dec"], when_hst)
+                am, el, az = engine.compute_airmass_curve(e["ra"], e["dec"],
+                                                           [when_hst])
+                now = dict(az=float(az[0]), el=float(el[0]),
+                           state=engine.pointing_state(float(el[0]),
+                                                       float(az[0]), tel))
+            except Exception:
+                track = now = None
+        try:
+            maz, mel = engine.moon_altaz_deg(when_utc)
+            moon = dict(az=maz, el=mel,
+                        illum_pct=engine.moon_illumination_fraction(when_utc) * 100.0)
+        except Exception:
+            moon = None
+        name = e["name"] if e is not None else "click a row"
+        draw_sky(fig, tel, track=track, now=now, moon=moon, is_utc=is_utc,
+                 title=f"{name} — {tel} sky (zenith centre, N up, E right)")
+        self._starlist_sky_canvas.draw_idle()
 
     def _starlist_refresh_detail(self):
         """Re-evaluate the currently-shown row (if any) -- called when the
         "Evaluate at" time changes, so the detail panel updates live rather
-        than requiring a re-click."""
+        than requiring a re-click. With no row picked, the sky plot still
+        moves the Moon."""
         row = getattr(self, "_starlist_selected_row", None)
         if row is not None:
             self._starlist_show_detail(row)
+        else:
+            self._starlist_draw_sky(None)
 
     def _starlist_refresh_ha_column(self):
         """Recompute the HA column for every row -- called when the
@@ -807,6 +858,8 @@ class StarlistPickerMixin:
     def _on_starlist_dialog_closed(self):
         self._starlist_dialog = None
         self._starlist_table = None
+        self._starlist_sky_fig = None
+        self._starlist_sky_canvas = None
         self._starlist_detail_id = None
         self._starlist_detail_azel = None
         self._starlist_detail_moon = None
