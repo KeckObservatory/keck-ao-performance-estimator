@@ -9,7 +9,7 @@ import numpy as np
 
 from ._version import __version__, APP_NAME
 from .budget import (
-    DEF_LGS_OFFSET, DEFAULT_BUDGET_VERSION, LTAO_BW_FLOOR_FRAC,
+    DEF_LGS_OFFSET, INSTRUMENTS, DEFAULT_BUDGET_VERSION, LTAO_BW_FLOOR_FRAC,
     LTAO_RATE_SINGLE, LTAO_RATE_TOMO, apply_budget_version, ltao_bw_factor,
 )
 from .constants import (
@@ -18,6 +18,7 @@ from .constants import (
     DEF_TARGET_NAME, DEF_TARGET_RA, DEF_TELESCOPE, DEF_WINDOWS,
     MOFFAT_BETA_KOLM, TEL_DIAMETER_M, V_FREE, V_GROUND,
 )
+from .config import resolve_lgs_offset
 from .export import write_csv_table
 from .ngs import NGS_K1_QUADCELL_PENALTY, NGS_PARAMS, NGS_SEEING_LAW, NGS_SK_ANCHOR
 from .pipeline import compute_timeline, prepare_night
@@ -253,10 +254,23 @@ def build_parser():
                       help="beacon (single-LGS) / asterism-center (LTAO) "
                            "offset from the science direction, arcsec, for "
                            "the angular-anisoplanatism term. Default: the "
-                           "telescope's operational offset (K1: %.2f\", "
-                           "K2: %.0f\"); the original 44 nm allocation "
-                           "assumed 2\"." % (DEF_LGS_OFFSET["K1"],
-                                             DEF_LGS_OFFSET["K2"]))
+                           "operational offset for the telescope and "
+                           "--instrument -- %.2f\" on K1 with the OSIRIS "
+                           "imager only; 0 for the OSIRIS spectrograph and on "
+                           "K2 (NIRC2). The original 44 nm allocation assumed "
+                           "2\"." % DEF_LGS_OFFSET["K1"])
+    g_tt.add_argument("--instrument", choices=list(INSTRUMENTS), default=None,
+                      help="science instrument, for the LGS-offset default: "
+                           "osiris-imager (K1 default; laser offset %.2f\"), "
+                           "osiris-spec (on axis) or nirc2 (K2 default; on "
+                           "axis)." % DEF_LGS_OFFSET["K1"])
+    g_tt.add_argument("--lgs-flux-model", action="store_true",
+                      help="scale the LGS measurement-error term with the "
+                           "modelled sodium return at the target's pointing "
+                           "(1/airmass, extinction, geomagnetic efficiency vs "
+                           "azimuth/elevation; lgs_flux.py). Off: the fixed "
+                           "zenith term, as before. Ignored under "
+                           "--legacy-budget.")
     g_tt.add_argument("--ltao-bw-floor-frac", type=float,
                       default=LTAO_BW_FLOOR_FRAC, metavar="FRAC",
                       help="fraction (0-1) of the single-beacon bandwidth "
@@ -510,7 +524,7 @@ def main(args):
     print(f"\nNight {night_date.date()}  telescope {args.telescope}  "
           f"tomography {'ON' if tomography_on else 'off'}  "
           f"({len(times)} DIMM samples, {n_mass} MASS profiles)")
-    _lgs_off = DEF_LGS_OFFSET[args.telescope] if args.lgs_offset is None else args.lgs_offset
+    _lgs_off = resolve_lgs_offset(args)
     print(f"  budget: {'LEGACY' if args.legacy_budget else 'refined 2026-07'}"
           f" values v{getattr(args, 'budget_version', DEFAULT_BUDGET_VERSION)}  "
           f"TT star: R={args.tt_mag:g} at {args.tt_offset:g}\" "

@@ -15,8 +15,8 @@ from .budget import (
     ltao_bw_factor,
 )
 from .config import (
-    default_output_name, parse_night, parse_windows, resolve_tomography,
-    resolve_tt_sensor, resolve_wavelength,
+    default_output_name, parse_night, parse_windows, resolve_lgs_offset,
+    resolve_tomography, resolve_tt_sensor, resolve_wavelength,
 )
 from .constants import (
     DEF_WINDOWS, DM_ACTUATORS_ACROSS, LAMBDA_K_NM, REF_FREEATM, REF_TOTAL,
@@ -297,16 +297,27 @@ def compute_timeline(args, prep):
     if profiles and len(dimm_sec_sorted):
         # zenith factor at the profile times (same baseline/window rules as DIMM)
         prof_dts = [p[0] for p in profiles]
+        # pointing for the optional LGS-flux model (--lgs-flux-model): the
+        # target's az/el inside its windows; elsewhere the fixed zenith angle
+        # with no azimuth (azimuth-averaged return); None = zenith (no scaling)
+        _flux_on = bool(getattr(args, "lgs_flux_model", False))
+        _za0 = float(getattr(args, "zenith_angle", 0.0) or 0.0)
+        _azel_base = (None, 90.0 - _za0) if (_flux_on and _za0) else None
         if show_target:
             am_p, el_p, _az_p = compute_airmass_curve(args.ra, args.dec, prof_dts)
-            zf_prof = [float(am) ** (3.0 / 5.0)
-                       if (in_any_window(pt) and el > 0 and np.isfinite(am))
-                       else baseline_zen_factor
-                       for pt, am, el in zip(prof_dts, am_p, el_p)]
+            _in = [in_any_window(pt) and el > 0 and np.isfinite(am)
+                   for pt, am, el in zip(prof_dts, am_p, el_p)]
+            zf_prof = [float(am) ** (3.0 / 5.0) if ok else baseline_zen_factor
+                       for ok, am in zip(_in, am_p)]
+            azel_prof = [((float(az), float(el)) if ok else _azel_base)
+                         if _flux_on else None
+                         for ok, az, el in zip(_in, _az_p, el_p)]
         else:
             zf_prof = [fixed_zen_factor] * len(prof_dts)
+            azel_prof = [_azel_base] * len(prof_dts)
 
-        for (pdt, psec, eps_fa_raw, cn2_bins), zf in zip(profiles, zf_prof):
+        for (pdt, psec, eps_fa_raw, cn2_bins), zf, azel in zip(profiles, zf_prof,
+                                                               azel_prof):
             j = int(np.argmin(np.abs(dimm_sec_sorted - psec)))
             if abs(dimm_sec_sorted[j] - psec) > args.match_tol:
                 continue      # no DIMM total-seeing input near this profile
@@ -320,7 +331,8 @@ def compute_timeline(args, prep):
             p_times.append(pdt)
             p_secs.append(psec)
             _bkw = dict(tt_mag=args.tt_mag, tt_offset=args.tt_offset,
-                        lgs_offset=args.lgs_offset, legacy=args.legacy_budget,
+                        lgs_offset=resolve_lgs_offset(args),
+                        legacy=args.legacy_budget, lgs_flux_azel=azel,
                         bw_factor=_ltao_bw_fac,
                         v_ground=args.wind_ground, v_free=args.wind_free,
                         tt_sensor=getattr(args, "_tt_sensor_base", "strap"),

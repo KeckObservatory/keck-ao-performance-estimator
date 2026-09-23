@@ -865,6 +865,17 @@ class Nirc2StrehlTabMixin:
         self._nirc2_start(files=[(label, os.path.join(path, disk_name))])
 
     # ---- auto-measure: the IDL tool's autoimage timer ---------------------
+    def _frame_flux_azel(self, p):
+        """(az, el) from the frame header for the optional LGS-flux model,
+        or None (option off, or the header lacks a usable AZ/EL)."""
+        if not getattr(self.args_cached, "lgs_flux_model", False):
+            return None
+        az, el = getattr(p, "az_deg", None), getattr(p, "el_deg", None)
+        if az is None or el is None or not (np.isfinite(az) and np.isfinite(el)) \
+                or el <= 0:
+            return None
+        return (float(az), float(el))
+
     def _nirc2_kind(self):
         return self.n2_instrument.currentText().lower()   # nirc2 / osiris
 
@@ -2741,7 +2752,18 @@ class Nirc2StrehlTabMixin:
                                     self.args_cached.ltao_bw_floor_frac))
                     _bkw = dict(
                         tt_mag=mag_to_use, tt_offset=offset_to_use,
-                        lgs_offset=self.args_cached.lgs_offset,
+                        # the FRAME's own instrument (its header routing:
+                        # osiris_frame_params sets camname "osiris"), not
+                        # the GUI selector, sets the LGS-offset default;
+                        # OSIRIS frames here are imager frames (spectrograph
+                        # frames never reach this tool)
+                        lgs_offset=(self.args_cached.lgs_offset
+                                    if self.args_cached.lgs_offset is not None
+                                    else engine.default_lgs_offset(
+                                        tel, "osiris-imager"
+                                        if p.camname == "osiris"
+                                        else "nirc2")),
+                        lgs_flux_azel=self._frame_flux_azel(p),
                         legacy=self.args_cached.legacy_budget,
                         bw_factor=bw_factor,
                         v_ground=self.args_cached.wind_ground,

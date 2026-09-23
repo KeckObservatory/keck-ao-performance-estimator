@@ -529,8 +529,8 @@ def render_terms_figure(args, prep, res):
         # angular-aniso panel: label the offset actually charged, and show what
         # an on-axis (0") laser would cost -- identically zero under the
         # refined law, so that reference is a note rather than a flat line
-        _th = (DEF_LGS_OFFSET[args.telescope] if args.lgs_offset is None
-               else args.lgs_offset)
+        from .config import resolve_lgs_offset
+        _th = resolve_lgs_offset(args)
         #  the 1" reference stands in for realistic imperfect laser centering:
         #  a perfectly on-axis (0") beacon would zero this term, but perfect
         #  centering may not be achievable in practice
@@ -1078,8 +1078,11 @@ def render_predicted_terms_figure(args, snap, bw_factor, lam_nm, lam_label):
     from .marechal import marechal_strehl
 
     et, ef = snap["eps_tot_los"], snap["eps_fa_los"]
+    from .config import resolve_lgs_offset
+    from .fieldmap import _snapshot_azel
     kw = dict(tt_mag=args.tt_mag, tt_offset=args.tt_offset,
-              lgs_offset=args.lgs_offset, legacy=args.legacy_budget,
+              lgs_offset=resolve_lgs_offset(args), legacy=args.legacy_budget,
+              lgs_flux_azel=_snapshot_azel(args, None, snap),   # synthetic: az-averaged
               v_ground=args.wind_ground, v_free=args.wind_free,
               aniso_scale=snap.get("aniso_scale", 1.0),
               tt_sensor=getattr(args, "_tt_sensor_base", "strap"),

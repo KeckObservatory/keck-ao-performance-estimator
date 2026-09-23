@@ -267,6 +267,25 @@ def field_map_grid(args, prep, snap, mode, metric, ngs_xy, tt_xy, laser_xy,
     return [-half_x, half_x, -half_y, half_y], Z, meta
 
 
+def _snapshot_azel(args, prep, snap):
+    """Pointing for the optional LGS-flux model (--lgs-flux-model), or None.
+    Night snapshots with a target: its az/el at the snapshot time. Otherwise
+    (no target, synthetic scenarios): no azimuth, the elevation from the
+    snapshot airmass -> the azimuth-averaged return."""
+    if not getattr(args, "lgs_flux_model", False):
+        return None
+    t = snap.get("t_hst")
+    if t is not None and getattr(prep, "show_target", False):
+        from .geometry import compute_airmass_curve
+        am, el, az = compute_airmass_curve(args.ra, args.dec, [t])
+        if np.isfinite(el[0]) and el[0] > 0:
+            return (float(az[0]), float(el[0]))
+    X = snap.get("airmass")
+    if X is not None and np.isfinite(X) and X > 1.0:
+        return (None, float(np.degrees(np.arcsin(1.0 / X))))
+    return None
+
+
 def _field_context(args, prep, snap, mode, metric, ngs_xy, tt_xy, laser_xy,
                    ngs_delta_var, ngs_bright_override=None, tt_mag_override=None):
     """Precompute everything a per-point field evaluation needs that does NOT
@@ -303,7 +322,8 @@ def _field_context(args, prep, snap, mode, metric, ngs_xy, tt_xy, laser_xy,
                v_ground=args.wind_ground, v_free=args.wind_free,
                aniso_scale=f_an, tt_sensor=tt_sensor,
                tt_spot_theta=star_laser,
-               ltao_tt_theta0_gain=ltao_tt_gain)
+               ltao_tt_theta0_gain=ltao_tt_gain,
+               lgs_flux_azel=_snapshot_azel(args, prep, snap))
     # the FWHM metrics call tt_wfe_nm directly (below), outside
     # lgs_budget_terms -- fold the same LTAO tilt-aniso reduction into the
     # aniso_scale that call uses, so Strehl and FWHM maps stay consistent

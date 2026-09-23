@@ -36,6 +36,7 @@ from .atmosphere import (
 from .budget import (
     ADJUSTABLE_BUDGET_PARAMS, ANG_REF_OFFSET, BUDGET_DEFAULTS, BUDGET_VERSIONS,
     DEF_LASER_PA_DEG, DEF_LGS_OFFSET, DEFAULT_BUDGET_VERSION, FITTING_ERR,
+    INSTRUMENTS, default_lgs_offset,
     LTAO_BW_FLOOR_FRAC, RECON_PRIOR_ALOFT, RECON_PRIOR_FRAC,
     LTAO_RATE_SINGLE, LTAO_RATE_TOMO, STATIC_TEL, active_budget_overrides,
     apply_budget_version, budget_overrides, get_budget_param, layer_mismatch,
@@ -47,6 +48,7 @@ from .catalogs import (
 from .cli import build_parser, main, _cli
 from .config import (
     default_output_name, parse_night, parse_windows, resolve_tomography,
+    resolve_instrument, resolve_lgs_offset,
     resolve_tt_sensor, resolve_wavelength,
 )
 from .constants import (

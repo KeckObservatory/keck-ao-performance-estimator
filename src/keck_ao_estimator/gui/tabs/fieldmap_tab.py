@@ -218,6 +218,9 @@ class FieldMapMixin:
                     self.fm_nirc2_fov):
             wdg.currentTextChanged.connect(self._on_fieldmap_input_changed)
         self.fm_osiris_mode.currentTextChanged.connect(self._on_fm_fov_mode)
+        # imager vs spectrograph also sets the LGS-offset default (K1: the
+        # laser is offset only for the OSIRIS imager) -> budget recompute
+        self.fm_osiris_mode.currentTextChanged.connect(self._on_compute_changed)
         self.fm_for.toggled.connect(self._on_fieldmap_input_changed)
         self.tel_k1.toggled.connect(self._sync_fm_fov_controls)
         self._sync_fm_fov_controls()
@@ -750,7 +753,7 @@ class FieldMapMixin:
         engine.DEF_LASER_PA_DEG = the K1 campaign direction)."""
         tel = "K1" if self.tel_k1.isChecked() else "K2"
         r = (self.lgs_offset.value() if self.lgs_offset_enable.isChecked()
-             else engine.DEF_LGS_OFFSET[tel])
+             else engine.default_lgs_offset(tel, self._current_instrument()))
         pa = np.radians(self.laser_pa.value())
         return (-r * np.sin(pa), r * np.cos(pa))     # x=-East(=West+), y=North
 

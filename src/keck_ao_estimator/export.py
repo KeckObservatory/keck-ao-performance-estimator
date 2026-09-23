@@ -126,7 +126,9 @@ def write_csv_table(args, prep, res, csv_path):
                      f"tomography={'on' if tomography_on else 'off'} "
                      f"target={'on' if show_target else 'off'} "
                      f"wavelength={lam_label}\n")
-            _lo = DEF_LGS_OFFSET[args.telescope] if args.lgs_offset is None else args.lgs_offset
+            from .config import resolve_instrument, resolve_lgs_offset
+            _lo = resolve_lgs_offset(args)
+            _inst = resolve_instrument(args)
             fh.write(f"# budget={'legacy' if args.legacy_budget else 'refined-2026-07'} "
                      f"tt_star=R{args.tt_mag:g}@{args.tt_offset:g}arcsec "
                      f"lgs_offset={_lo:g}arcsec ngs_offset={float(args.ngs_offset or 0):g}arcsec"
@@ -140,6 +142,15 @@ def write_csv_table(args, prep, res, csv_path):
                         if args.ngs_seeing_law == "kolmogorov" else "")
                      + (f" assumed_theta0={args.assumed_theta0:g}arcsec(K,zenith)"
                         if args.assumed_theta0 is not None else "") + "\n")
+            # instrument / LGS-flux model: recorded only when set away from the
+            # defaults, so default outputs (and the regress refs) are unchanged
+            _extra = []
+            if getattr(args, "instrument", None):
+                _extra.append(f"instrument={_inst}")
+            if getattr(args, "lgs_flux_model", False) and not args.legacy_budget:
+                _extra.append("lgs_flux_model=on(meas_term_scaled_by_return_vs_az_el)")
+            if _extra:
+                fh.write("# " + " ".join(_extra) + "\n")
             # A what-if run (GUI WFE sliders) records the moved parameters here
             # so a modified budget can never masquerade as the reference (§0.3).
             # Absent entirely when nothing is overridden, so reference outputs

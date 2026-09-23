@@ -368,7 +368,27 @@ RECON_PRIOR_ALOFT = RECON_PRIOR_FRAC[1:] / RECON_PRIOR_FRAC[1:].sum()
 #      the magnitude alone is what the science-direction budget needs.
 ANG_REF_OFFSET = 2.0                       # arcsec; offset the 44 nm assumed
 DEF_LGS_OFFSET = {"K1": 4.97, "K2": 0.0}   # operational beacon/asterism-center
-                                           # offset from science, arcsec
+                                           # offset from science, arcsec. The K1
+                                           # value is the OSIRIS IMAGER case only:
+                                           # see default_lgs_offset().
+INSTRUMENTS = ("osiris-imager", "osiris-spec", "nirc2")
+
+
+def default_lgs_offset(telescope, instrument=None):
+    """Operational beacon/asterism-centre offset from the science direction,
+    arcsec, for a telescope + science instrument.
+
+    The laser is offset by default ONLY on K1 with the OSIRIS imager
+    (DEF_LGS_OFFSET["K1"] = 4.97", the bench stage-alignment offset of the
+    imager field). The OSIRIS spectrograph and NIRC2/K2 have it on axis: 0.
+    instrument None = the telescope's default instrument (K1: OSIRIS imager,
+    K2: NIRC2), which keeps every pre-existing K1 result unchanged.
+    (Eduardo Marin, 2026-09-22.)"""
+    if instrument is None:
+        instrument = "osiris-imager" if telescope == "K1" else "nirc2"
+    if telescope == "K1" and instrument == "osiris-imager":
+        return DEF_LGS_OFFSET["K1"]
+    return 0.0
 DEF_LASER_PA_DEG = 254.8                   # N->E; K1 campaign direction
                                            # (4.8" W, 1.3" S). Field map only:
                                            # the budget term is radial.
@@ -409,7 +429,8 @@ def lgs_budget_terms(eps_total, eps_freeatm, telescope, mode,
                      lgs_offset=None, legacy=False, bw_factor=HALF_RATE_BW_FAC,
                      v_ground=V_GROUND, v_free=V_FREE, aniso_scale=1.0,
                      tt_sensor="strap", tt_spot_theta=None,
-                     strap_law="sheet", ltao_tt_theta0_gain=None):
+                     strap_law="sheet", ltao_tt_theta0_gain=None,
+                     lgs_flux_azel=None):
     """Per-sample LGS/LTAO error-budget terms in nm RMS, as a dict.
 
     Single source of truth for the budget: lgs_strehl() sums these in
@@ -426,6 +447,12 @@ def lgs_budget_terms(eps_total, eps_freeatm, telescope, mode,
     altitude distribution, and this factor -- (theta0_ref/theta0)^(5/6) --
     expresses a scenario whose theta0 is decoupled from its free-atm seeing
     (GUI prediction tab). Default 1.0 = every night-data path, unchanged.
+
+    lgs_flux_azel: optional (azimuth, elevation) of the pointing, degrees.
+    When given, the measurement term scales with the modelled sodium return
+    at that pointing, HOMEAS * F(az, el)^(-1/2) (lgs_flux.py: 1/airmass,
+    extinction, geomagnetic efficiency; zenith = HOMEAS). None = the fixed
+    zenith HOMEAS, unchanged. Never applied under legacy.
     """
     fitting = FITTING_ERR[telescope]
 
@@ -494,8 +521,13 @@ def lgs_budget_terms(eps_total, eps_freeatm, telescope, mode,
     tt = tt_wfe_nm(s_tot, tt_mag, tt_offset, tt_aniso, sensor=_tts,
                    spot_theta=tt_spot_theta, strap_law=strap_law)
 
+    meas = HOMEAS
+    if lgs_flux_azel is not None and not legacy:
+        from .lgs_flux import meas_scale
+        meas = HOMEAS * meas_scale(*lgs_flux_azel)
+
     return dict(fit=fit, scint=scint, ang=ang, bw=bw, alt=alt,
-                meas=HOMEAS, nafoc=NAFOC,
+                meas=meas, nafoc=NAFOC,
                 stat_tel=STATIC_TEL[telescope], stat_calib=STATIC_CALIB,
                 stat_dm=STATIC_DM, stat_inst=STATIC_INST, stat_reg=STATIC_REG,
                 margin=MARGIN, tt=tt)
@@ -506,7 +538,8 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                lgs_offset=None, legacy=False, bw_factor=HALF_RATE_BW_FAC,
                v_ground=V_GROUND, v_free=V_FREE, aniso_scale=1.0,
                tt_sensor="strap", tt_spot_theta=None,
-               strap_law="sheet", ltao_tt_theta0_gain=None):
+               strap_law="sheet", ltao_tt_theta0_gain=None,
+               lgs_flux_azel=None):
     """Single-beacon LGS or LTAO Strehl for one sample, at wavelength lam_nm.
 
     Parameters
@@ -519,7 +552,10 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                    independent, only the Marechal Strehl evaluation uses lam_nm.
     lgs_offset   : beacon (single) / asterism-center (LTAO) offset from the
                    science direction, arcsec. None -> the telescope's
-                   operational default (K1: 4.97", K2: 0"). The angular-
+                   default-instrument offset (K1 OSIRIS imager: 4.97", K2: 0");
+                   callers that know the instrument pass
+                   default_lgs_offset(telescope, instrument), which is 0 for
+                   the OSIRIS spectrograph. The angular-
                    anisoplanatism term scales as (offset/2")^(5/6) and is
                    zero on-axis; under legacy=True the flat 2"-allocation
                    charge is used regardless.
@@ -538,6 +574,9 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                    None -> DEF_LTAO_TT_THETA0_GAIN (1.0 = disabled per
                    KAON 1303 section 5.5: single-TT-star LTAO gets no
                    tilt-aniso reduction). See the tiptilt.py block.
+    lgs_flux_azel : optional (az, el) in degrees. Scales the measurement
+                   term with the modelled LGS return at that pointing (see
+                   lgs_budget_terms and lgs_flux.py). None -> fixed HOMEAS.
 
     Returns the Strehl at lam_nm (high-order x tip-tilt). The individual nm
     terms are available from lgs_budget_terms() with the same arguments.
@@ -546,7 +585,8 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                          tt_mag, tt_offset, lgs_offset, legacy, bw_factor,
                          v_ground, v_free, aniso_scale, tt_sensor=tt_sensor,
                          tt_spot_theta=tt_spot_theta, strap_law=strap_law,
-                         ltao_tt_theta0_gain=ltao_tt_theta0_gain)
+                         ltao_tt_theta0_gain=ltao_tt_theta0_gain,
+                         lgs_flux_azel=lgs_flux_azel)
     ho = np.sqrt(t["alt"]**2 + t["ang"]**2 + t["fit"]**2 + t["bw"]**2
                  + t["scint"]**2 + t["meas"]**2 + t["nafoc"]**2
                  + t["stat_tel"]**2 + t["stat_calib"]**2 + t["stat_dm"]**2

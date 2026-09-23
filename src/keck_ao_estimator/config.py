@@ -46,6 +46,29 @@ def resolve_tomography(args):
     return args.tomography
 
 
+def resolve_instrument(args):
+    """Science instrument for the run's telescope. K2 -> NIRC2 always (its
+       only instrument here). K1 -> the OSIRIS spectrograph if --instrument
+       says so, else the OSIRIS imager. args.instrument is thus the K1 OSIRIS
+       choice and survives a telescope swap (the Summary tab evaluates the
+       other telescope from a copy of the same args)."""
+    if getattr(args, "telescope", "K2") != "K1":
+        return "nirc2"
+    return ("osiris-spec" if getattr(args, "instrument", None) == "osiris-spec"
+            else "osiris-imager")
+
+
+def resolve_lgs_offset(args):
+    """Beacon/asterism-centre offset (arcsec) actually used: --lgs-offset if
+       given, else the operational default for telescope + instrument -- only
+       K1 with the OSIRIS imager is offset (4.97"); the OSIRIS spectrograph and
+       K2/NIRC2 are on axis (0)."""
+    from .budget import default_lgs_offset
+    if getattr(args, "lgs_offset", None) is not None:
+        return float(args.lgs_offset)
+    return default_lgs_offset(args.telescope, resolve_instrument(args))
+
+
 def resolve_tt_sensor(args):
     """Normalize --tt-sensor onto args: sets args._tt_sensor_base ('strap' or
     'trick') and args._tt_wfs_band ('R'/'H'/'K'). For TRICK on K1 the dichroic

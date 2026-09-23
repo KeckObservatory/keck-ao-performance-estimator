@@ -56,8 +56,7 @@ def _build_summary(args, prep, res, offsets=None):
     n_dimm = len(res.times)
     n_mass = len(res.p_times)
     tomo = "ON" if prep.tomography_on else "off"
-    lgs_off = (engine.DEF_LGS_OFFSET[args.telescope]
-               if args.lgs_offset is None else args.lgs_offset)
+    lgs_off = engine.resolve_lgs_offset(args)
     parts = [
         f"Night {prep.night_date.date()}  {args.telescope}  tomography {tomo}"
         f"  ({n_dimm} DIMM, {n_mass} MASS)",
@@ -541,6 +540,13 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         a.ltao_bw_floor_frac = float(self.ltao_floor.value())
         a.ltao_tt_theta0_gain = float(self.ltao_tt_gain.value())
         a.legacy_budget = self.legacy_cb.isChecked()
+        # the K1 OSIRIS choice (Field map tab), recorded whatever telescope
+        # is selected -- resolve_instrument maps K2 to NIRC2, and the Summary
+        # tab's other-telescope copy must keep K1's instrument
+        a.instrument = ("osiris-spec"
+                        if self.fm_osiris_mode.currentText().startswith("spectro")
+                        else "osiris-imager")
+        a.lgs_flux_model = self.lgs_flux_cb.isChecked()
         tomo = self.tomo_combo.currentText()
         a.tomography = (None if tomo.startswith("auto")
                         else (tomo == "on"))
@@ -1113,6 +1119,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             "ltao_floor": self.ltao_floor.value(),
             "ltao_tt_gain": self.ltao_tt_gain.value(),
             "legacy": self.legacy_cb.isChecked(),
+            "lgs_flux_model": self.lgs_flux_cb.isChecked(),
             "tomo": self.tomo_combo.currentText(),
             "wfe": {name: r["spin"].value() for name, r in self.wfe_rows.items()},
             "prediction": {
@@ -1137,7 +1144,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                    self.ngs_s0, self.ngs_a, self.ngs_m0, self.ngs_w,
                    self.k1_quadcell, self.tt_sensor, self.tt_mag, self.laser_pa,
                    self.lgs_offset, self.ltao_floor, self.ltao_tt_gain,
-                   self.tomo_combo, self.windows_list, self.za_spin,
+                   self.tomo_combo, self.lgs_flux_cb, self.windows_list, self.za_spin,
                    self.za_enable, self.pred_enable, self.pred_theta0_auto,
                    self.pred_layers_enable,
                    self.fm_osiris_mode, self.fm_osiris_scale,
@@ -1314,6 +1321,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self.ltao_tt_gain.setValue(c.get(
                 "ltao_tt_gain", self.defaults.ltao_tt_theta0_gain))
             self.legacy_cb.setChecked(c.get("legacy", False))
+            self.lgs_flux_cb.setChecked(c.get("lgs_flux_model", False))
             self.tomo_combo.setCurrentText(c.get("tomo", "auto (per telescope)"))
             for name, val in c.get("wfe", {}).items():
                 if name in self.wfe_rows:

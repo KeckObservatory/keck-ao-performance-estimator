@@ -3,6 +3,42 @@
 All notable changes to the Keck AO Performance Estimator. The project
 is released on GitHub only (pin `@v1.2.2` in the install URL).
 
+## Unreleased
+
+### Added
+- LGS tab: **LGS flux** sub-tab with an option to **scale the measurement
+  error with the modelled LGS return** at the target's pointing
+  (`--lgs-flux-model` on the CLI). The return relative to zenith is
+  F = (1/X) · T^(2(X−1)) · g(θ_B)/g_zenith, with g = 1 − C·sin²θ_B and θ_B
+  the angle between the beam and the geomagnetic field line (T = 0.84,
+  C = 0.45, dip 36°, declination 9.5° E). The measurement term becomes
+  HOMEAS · F^(−1/2).
+  - C was calibrated on the 2026-09-21 LGS WFS counts: the model gives a
+    TYC 5858-779-1 / UCAC4 748-00066 ratio of 0.74 against 0.75
+    measured. It also matches the 2016 return-vs-pointing data to ~0.1
+    mag.
+  - The pointing comes from: the target's az/el (timeline); the snapshot
+    time (field map); the frame header (Measured SR comparison); the
+    azimuth average at the zenith angle (Prediction scenarios).
+  - The page shows a sky map of the modelled return.
+  - Off by default. Off and under the legacy budget, every result is
+    unchanged. Saved in configs.
+- `--instrument {osiris-imager, osiris-spec, nirc2}` for the LGS-offset
+  default (below).
+
+### Changed
+- **LGS offset default: the laser is offset only on K1 with the OSIRIS
+  imager** (4.97″). The OSIRIS spectrograph and K2/NIRC2 are on axis (0″).
+  - In the GUI, the instrument follows the Field map tab's OSIRIS imager /
+    spectrograph selector on K1. Switching it recomputes and moves the
+    laser on the field map.
+  - The Measured SR comparison uses the frame's own instrument.
+  - An explicit LGS-offset override still wins.
+  - Defaults are unchanged for existing runs: K1 without `--instrument` is
+    the imager.
+
+Regress `gui_phase44`.
+
 ## 1.2.2 — 2026-09-22
 
 ### Added

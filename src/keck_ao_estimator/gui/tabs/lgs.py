@@ -40,8 +40,10 @@ class LgsTabMixin:
         # scrollbar; the parenthetical lives in the tooltip instead
         self.lgs_offset_enable = QtWidgets.QCheckBox("override")
         self.lgs_offset_enable.setToolTip(
-            "Override the LGS offset; unchecked uses the per-telescope "
-            "default.")
+            "Override the LGS offset. Unchecked uses the operational default: "
+            f"{engine.DEF_LGS_OFFSET['K1']:g}\" only on K1 with the OSIRIS "
+            "imager; 0\" with the OSIRIS spectrograph (Field map tab -> "
+            "OSIRIS) and on K2.")
         self.lgs_offset = _dspin(0, 120, 0.5, 0.0, 1, '"')
         self.lgs_offset.setEnabled(False)
         self.lgs_offset_enable.toggled.connect(self.lgs_offset.setEnabled)
@@ -171,7 +173,94 @@ class LgsTabMixin:
         self.tt_sensor.currentTextChanged.connect(self._on_tt_sensor_changed)
         self.tel_k1.toggled.connect(self._sync_tt_sensor_for_tel)
         self._sync_tt_sensor_for_tel()
-        return self._scroll(w)
+
+        # The dock must never need to scroll (house rule): the LGS-flux option
+        # is a SUB-TAB of LGS rather than more rows under the full budget page
+        # (same pattern as Prediction's Scenario/Layers).
+        self.lgs_subtabs = QtWidgets.QTabWidget()
+        self.lgs_subtabs.addTab(w, "Budget")
+        self.lgs_subtabs.addTab(self._build_lgs_flux_page(), "LGS flux")
+        return self._scroll(self.lgs_subtabs)
+
+    # ---- LGS return flux vs pointing (measurement error) ---------------------
+    def _build_lgs_flux_page(self):
+        from ...lgs_flux import (GEOMAG_CONTRAST, GEOMAG_DECL_DEG,
+                                 GEOMAG_DIP_DEG, LGS_FLUX_TRANSMISSION)
+        w = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(w)
+        self.lgs_flux_cb = QtWidgets.QCheckBox(
+            "Scale meas. error with LGS flux")
+        self.lgs_flux_cb.setChecked(bool(getattr(self.defaults, "lgs_flux_model", False)))
+        self.lgs_flux_cb.setToolTip(
+            "Off: the budget's measurement term is a fixed zenith value. "
+            "On: it scales as F^(-1/2), with F the modelled sodium return at "
+            "the target's pointing relative to zenith (1/airmass, extinction "
+            "and geomagnetic pumping efficiency vs azimuth/elevation). "
+            "Ignored under the legacy budget.")
+        v.addWidget(self.lgs_flux_cb)
+        note = QtWidgets.QLabel(
+            "Return relative to zenith: F = (1/X) · T<sup>2(X−1)</sup> · "
+            "g(θ<sub>B</sub>)/g<sub>zenith</sub>, g = 1 − C·sin²θ<sub>B</sub>, "
+            "θ<sub>B</sub> = angle between beam and geomagnetic field line. "
+            f"T = {LGS_FLUX_TRANSMISSION:g}, C = {GEOMAG_CONTRAST:g} "
+            f"(on-sky 2026-09-21), dip {GEOMAG_DIP_DEG:g}°, decl. "
+            f"{GEOMAG_DECL_DEG:g}° E. Measurement term × F<sup>−1/2</sup>. "
+            "Not modelled: sodium abundance changes, laser power, spot-size "
+            "growth with airmass.")
+        note.setWordWrap(True)
+        note.setStyleSheet("QLabel { color:#333; background:#f4f0e8; "
+                           "padding:5px; border:1px solid #ddd; }")
+        v.addWidget(note)
+        self.lgs_flux_fig = Figure(figsize=(3.4, 3.2))
+        self.lgs_flux_canvas = FigureCanvas(self.lgs_flux_fig)
+        self.lgs_flux_canvas.setMinimumHeight(230)
+        self.lgs_flux_canvas.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding)
+        v.addWidget(self.lgs_flux_canvas, 1)
+        self._draw_lgs_flux_map()
+        self.lgs_flux_cb.toggled.connect(self._on_compute_changed)
+        self.lgs_flux_cb.toggled.connect(self._on_fieldmap_input_changed)
+        return w
+
+    def _draw_lgs_flux_map(self):
+        """Polar map of the modelled return: zenith at the centre, rings of
+        zenith distance, N up and E right (the orientation of Holzlöhner et
+        al.'s Maunakea return map)."""
+        from ...lgs_flux import lgs_return_rel
+        fig = self.lgs_flux_fig
+        fig.clear()
+        ax = fig.add_axes([0.08, 0.2, 0.84, 0.72], projection="polar")
+        az = np.radians(np.arange(0, 361, 5))
+        zd = np.arange(0, 76, 3)
+        A, Z = np.meshgrid(az, zd)
+        F = np.vectorize(lambda a, z: lgs_return_rel(np.degrees(a), 90.0 - z))(A, Z)
+        cs = ax.contourf(A, Z, F, levels=np.linspace(0.2, 1.1, 10), cmap="viridis",
+                         extend="both")
+        ax.set_theta_zero_location("N")
+        ax.set_theta_direction(-1)         # N up, E right (as the reference map)
+        ax.set_ylim(0, 75)
+        ax.set_rlabel_position(200)
+        ax.set_yticks([30, 60])
+        ax.set_yticklabels(["30°", "60°"], fontsize=7, color="white")
+        ax.set_xticks(np.radians([0, 90, 180, 270]))
+        ax.set_xticklabels(["N", "E", "S", "W"], fontsize=8)
+        ax.grid(color="white", alpha=0.4, lw=0.6)
+        cax = fig.add_axes([0.15, 0.08, 0.7, 0.035])
+        cb = fig.colorbar(cs, cax=cax, orientation="horizontal")
+        cb.set_label("modelled LGS return / zenith", fontsize=7)
+        cb.ax.tick_params(labelsize=7)
+        self.lgs_flux_canvas.draw_idle()
+
+    def _current_instrument(self):
+        """Science instrument for the LGS-offset default: on K1 the Field map
+        tab's OSIRIS imager/spectrograph selector, on K2 NIRC2."""
+        if not self.tel_k1.isChecked():
+            return "nirc2"
+        mode = getattr(self, "fm_osiris_mode", None)
+        if mode is not None and mode.currentText().startswith("spectro"):
+            return "osiris-spec"
+        return "osiris-imager"
 
     # map the sensor combo <-> engine value; the science-band complement (K1
     # dichroic) each TRICK mode forces
@@ -269,7 +358,7 @@ class LgsTabMixin:
         (d_lon=East+, d_lat=North+): d_lon = -x = r*sin(pa), d_lat = y = r*cos(pa)."""
         tel = "K1" if self.tel_k1.isChecked() else "K2"
         r = (self.lgs_offset.value() if self.lgs_offset_enable.isChecked()
-             else engine.DEF_LGS_OFFSET[tel])
+             else engine.default_lgs_offset(tel, self._current_instrument()))
         pa = np.radians(self.laser_pa.value())
         return target_coord.spherical_offsets_by(
             r * np.sin(pa) * u.arcsec, r * np.cos(pa) * u.arcsec)
