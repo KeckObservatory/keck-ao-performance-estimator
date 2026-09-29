@@ -165,30 +165,64 @@ class NgsTabMixin:
             band=self.band_combo.currentText())
         return engine.resolve_wavelength(a)
 
+    # the preview's second-mode overlay (K2): the OTHER WFS mode's reference
+    # fit at this K seeing, in the HAKA report's colours (Figure 5: maroon
+    # 57x57, teal 29x29)
+    _OTHER_MODE_SEEING_K = 0.5
+    _MODE_COLOUR = {"57x57": "#7a1746", "29x29": "#127a86"}
+
+    @staticmethod
+    def _first_crossing(R, s_a, s_b):
+        """R where s_b - s_a first changes sign (linear interpolation), and
+        whether s_b is the better one fainter than it; (None, None) if the
+        curves never cross on the grid."""
+        d = np.asarray(s_b, float) - np.asarray(s_a, float)
+        idx = np.where(np.sign(d[:-1]) * np.sign(d[1:]) < 0)[0]
+        if not len(idx):
+            return None, None
+        i = int(idx[0])
+        rc = R[i] - d[i] * (R[i + 1] - R[i]) / (d[i + 1] - d[i])
+        return float(rc), bool(d[i + 1] > 0)
+
     def _update_ngs_fit_plot(self, *_):
         """Draw the current NGS Gompertz fit: Strehl vs R magnitude at a few
         K-band seeing values, AT THE SELECTED SCIENCE WAVELENGTH. The fit is a
         K-band fit; other wavelengths are the same Maréchal extrapolation the
         estimate uses (ngs_strehl backs out the implied WFE and re-evaluates).
-        Uses the live field values through the engine."""
+        Uses the live field values through the engine.
+
+        On K2 the OTHER WFS mode's reference fit is overlaid, dashed, at
+        0.5" K seeing only (Eduardo, 2026-09-28, mock-up B): with A and w tied
+        between the modes the seeing term cancels in their ratio, so one
+        seeing shows the whole comparison. The crossover against the active
+        mode at that seeing is marked, the R range the 29x29 fit has data for
+        is a bar on the x axis, and the 29x29 curve is thinner where it is
+        extrapolated."""
         if not getattr(self, "fit_canvas", None):
             return
         tel = "K1" if self.tel_k1.isChecked() else "K2"
+        wfs = self._active_ngs_wfs()
         lam_nm, lam_label = self._current_wavelength()
         is_k = abs(lam_nm - engine.LAMBDA_K_NM) < 1.0
         kw = dict(ngs_s0=self.ngs_s0.value(), ngs_a=self.ngs_a.value(),
                   ngs_m0=self.ngs_m0.value(), ngs_w=self.ngs_w.value(),
                   k1_quadcell=self.k1_quadcell.value(),
                   seeing_law=self.seeing_law.currentText())
-        R = np.linspace(6.0, 18.0, 90)
+        R = np.linspace(6.0, 18.0, 181)
         fig = self.fit_fig
         fig.clear()
         ax = fig.add_subplot(111)
+        self._ngs_preview_crossing = None
         try:
+            active_mid = None
             for epsK, col in ((0.3, "#2E8B57"), (0.5, "#B26A00"), (0.7, "#C0392B")):
                 eps500 = epsK / engine.V2K
                 S = [engine.ngs_strehl(eps500, r, tel, lam_nm, **kw) for r in R]
                 ax.plot(R, S, "-", lw=1.3, color=col, label=f'{epsK:g}" K seeing')
+                if epsK == self._OTHER_MODE_SEEING_K:
+                    active_mid = S
+            if tel == "K2":
+                self._draw_other_ngs_mode(ax, R, wfs, active_mid, lam_nm)
             for mag, lbl, c in ((self.ngs_bright.value(), "bright", "#6A3D9A"),
                                 (self.ngs_faint.value(), "faint", "#888")):
                 if R[0] <= mag <= R[-1]:
@@ -200,18 +234,56 @@ class NgsTabMixin:
         ax.set_xlim(R[0], R[-1]); ax.set_ylim(0, 1)
         ax.set_xlabel("NGS guide-star R (mag)", fontsize=8)
         ax.set_ylabel(f"Strehl @ {lam_label}", fontsize=8)
-        wfs = self._active_ngs_wfs()
-        title = (f"{tel} NGS fit preview — {lam_label}" if tel == "K1" else
-                 f"K2 NGS {wfs}{' (PRELIMINARY)' if wfs == '29x29' else ''}"
-                 f" fit preview — {lam_label}")
+        # short enough not to clip at the dock's width (the mode name
+        # replaces "preview"; PRELIMINARY lives in the legend)
+        title = (f"{tel} NGS fit — {lam_label}" if tel == "K1" else
+                 f"K2 NGS {wfs} fit — {lam_label}")
         if not is_k:
             title += "\n(extrapolated from the K-band fit)"
         ax.set_title(title, fontsize=8.5, fontweight="bold")
         ax.tick_params(labelsize=7)
         ax.grid(alpha=0.3)
-        ax.legend(fontsize=6.5, loc="upper right", framealpha=0.9)
+        ax.legend(fontsize=6, loc="upper right", framealpha=0.9)
         fig.tight_layout(pad=0.4)
         self.fit_canvas.draw_idle()
+
+    def _draw_other_ngs_mode(self, ax, R, wfs, active_mid, lam_nm):
+        """K2 overlay for _update_ngs_fit_plot: the other WFS mode's
+        reference fit (not the edited fields, which belong to the active
+        mode) at _OTHER_MODE_SEEING_K, its crossover with the active mode at
+        the same seeing, and the 29x29 fit's data range."""
+        other = "29x29" if wfs == "57x57" else "57x57"
+        epsK = self._OTHER_MODE_SEEING_K
+        S = np.array([engine.ngs_strehl(epsK / engine.V2K, r, "K2", lam_nm,
+                                        ngs_wfs=other,
+                                        seeing_law=self.seeing_law.currentText())
+                      for r in R])
+        col = self._MODE_COLOUR[other]
+        r_lo, r_hi = engine.NGS_29X29_FIT_RANGE_R
+        label = (f'29x29 prelim @ {epsK:g}"' if other == "29x29"
+                 else f'57x57 @ {epsK:g}"')
+        if other == "29x29":            # thinner where it is extrapolated
+            inr = (R >= r_lo) & (R <= r_hi)
+            ax.plot(np.where(inr, R, np.nan), S, "--", lw=1.6, color=col,
+                    label=label)
+            ax.plot(np.where(~inr, R, np.nan), S, "--", lw=0.8, color=col,
+                    alpha=0.6)
+        else:
+            ax.plot(R, S, "--", lw=1.6, color=col, label=label)
+        # where the 29x29 fit has data, whichever mode is active
+        ax.axvspan(r_lo, r_hi, ymin=0, ymax=0.015,
+                   color=self._MODE_COLOUR["29x29"], alpha=0.6, lw=0)
+        if active_mid is None:
+            return
+        rc, other_fainter = self._first_crossing(R, active_mid, S)
+        if rc is None:
+            return
+        fainter = other if other_fainter else wfs
+        self._ngs_preview_crossing = (rc, fainter)
+        ax.axvline(rc, color=self._MODE_COLOUR["29x29"], lw=0.8, alpha=0.5)
+        ax.annotate(f"{fainter} better\nfainter than R {rc:.1f}",
+                    xy=(rc, 0.62), xytext=(rc + 0.25, 0.62), fontsize=6,
+                    color=self._MODE_COLOUR[fainter], va="center")
 
     def _active_ngs_wfs(self):
         """The NGS WFS mode in force: the combo on K2, always the default

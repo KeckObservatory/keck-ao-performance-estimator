@@ -153,6 +153,17 @@ def cli_contract():
           f"->{m(r29, 'ngs_R14_strehl'):.3f}); provenance recorded; K1 refused")
 
 
+def preview(win):
+    """(dashed-overlay labels, crossing, title-fits) of the NGS fit preview."""
+    settle(); win.fit_canvas.draw(); settle()
+    ax = win.fit_fig.axes[0]
+    dashed = [ln.get_label() for ln in ax.get_lines()
+              if ln.get_linestyle() == "--" and not ln.get_label().startswith("_")]
+    bb = ax.title.get_window_extent(win.fit_canvas.get_renderer())
+    fits = bb.x0 >= 0 and bb.x1 <= win.fit_fig.bbox.width
+    return dashed, win._ngs_preview_crossing, fits
+
+
 def fields(win):
     return dict(S0=win.ngs_s0.value(), A=win.ngs_a.value(),
                 m0=win.ngs_m0.value(), w=win.ngs_w.value())
@@ -195,6 +206,23 @@ def gui_contract():
     assert not scroll.verticalScrollBar().isVisible(), "NGS tab scrolls"
     assert not scroll.horizontalScrollBar().isVisible()
 
+    # fit preview (mock-up B): the OTHER mode dashed at 0.5", the crossover
+    # (R 12.2, 29x29 better fainter) marked, the title not clipped
+    dashed, xing, fits = preview(win)            # 29x29 active
+    assert dashed == ['57x57 @ 0.5"'], dashed
+    assert xing and abs(xing[0] - 12.22) < 0.05 and xing[1] == "29x29", xing
+    assert fits, "preview title clipped (29x29)"
+    win.ngs_wfs.setCurrentText("57x57"); settle()
+    dashed, xing, fits = preview(win)            # 57x57 active
+    assert dashed == ['29x29 prelim @ 0.5"'], dashed
+    assert xing and abs(xing[0] - 12.22) < 0.05 and xing[1] == "29x29", xing
+    assert fits, "preview title clipped (57x57)"
+    prev = win.res
+    win.ngs_wfs.setCurrentText("29x29")
+    pump(lambda: win.res is not prev, timeout=10)
+    print(f"  [ok] preview: other mode dashed at 0.5\", crossover R "
+          f"{xing[0]:.2f} ({xing[1]} better fainter), title fits")
+
     # K1: combo disabled, K1 fit loaded, mode in force is 57x57
     prev = win.res
     win.tel_k1.setChecked(True)
@@ -203,6 +231,8 @@ def gui_contract():
     assert fields(win) == engine.NGS_PARAMS["K1"], fields(win)
     assert win.collect_args("").ngs_wfs == "57x57"
     assert win.args_cached.ngs_wfs == "57x57"
+    dashed, xing, fits = preview(win)            # K1: no overlay
+    assert dashed == [] and xing is None and fits, (dashed, xing, fits)
     # summary stats' other telescope: K2 takes the combo's mode (29x29) ...
     # (_other_telescope_res returns None on any engine error)
     assert win._other_telescope_res(win.collect_args(""), {}) is not None

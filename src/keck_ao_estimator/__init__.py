@@ -135,7 +135,8 @@ from .osiris import (
     osiris_frame_params,
 )
 from .ngs import (NGS_K1_QUADCELL_PENALTY, NGS_PARAMS, NGS_SEEING_LAW, NGS_SK_ANCHOR, ngs_strehl,
-                  NGS_WFS_MODES, DEF_NGS_WFS, NGS_PARAMS_K2_WFS, ngs_fit_params)
+                  NGS_WFS_MODES, DEF_NGS_WFS, NGS_PARAMS_K2_WFS, ngs_fit_params,
+                  NGS_29X29_FIT_RANGE_R)
 from .photometry import (
     SENSOR_BAND_UM, SENSOR_FAINT_LIMIT, estimate_sensing_mag,
     optical_extinction_lower_bound, pick_mag,

@@ -68,6 +68,7 @@ NGS_PARAMS_K2_WFS = {
     "57x57": NGS_PARAMS["K2"],
     "29x29": dict(S0=0.614, A=0.661, m0=14.64, w=1.58),   # PRELIMINARY
 }
+NGS_29X29_FIT_RANGE_R = (11.7, 15.3)   # WFS R of the stars behind the fit
 
 
 def ngs_fit_params(telescope, ngs_wfs=None):

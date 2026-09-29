@@ -34,6 +34,16 @@ is released on GitHub only (pin `@v1.3.0` in the install URL).
   - A non-default mode is recorded in the CSV provenance
     (`ngs_wfs=29x29(PRELIMINARY_fit)`) and in the run summary.
   - The Gompertz fields still override on top of the selected fit.
+  - **NGS fit preview on K2:**
+    - The other mode's fit is drawn dashed at 0.5″ K seeing.
+    - Its crossover with the active mode is marked ("29x29 better fainter
+      than R 12.2").
+    - A bar on the R axis shows the range the 29x29 fit has data for, and
+      the 29x29 curve is thinner where it is extrapolated.
+    - One seeing is enough: A and w are tied between the modes, so the
+      seeing term cancels in their ratio and the crossover is R 12.2 at
+      any seeing.
+    - The title is shorter and no longer clips at the dock's width.
   - Engine: `ngs_strehl(..., ngs_wfs=)`, `ngs_fit_params()`,
     `NGS_PARAMS_K2_WFS`, `NGS_WFS_MODES`, `DEF_NGS_WFS`.
   - Regression test `gui_phase46`.
