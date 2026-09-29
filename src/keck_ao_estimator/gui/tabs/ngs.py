@@ -88,11 +88,33 @@ class NgsTabMixin:
             f"set 0 to remove it.")
         f.addRow("K1 quadcell penalty:", self.k1_quadcell)
 
-        # reset-to-fit button (restore the active telescope's fitted values)
-        reset_fit = QtWidgets.QPushButton("Reset fit to telescope default")
+        # K2 NGS WFS mode + reset-to-fit button, sharing ONE row so the tab
+        # does not grow (the dock never scrolls). The mode selects which fit
+        # seeds the fields: 57x57 = HAKA N53, 29x29 = the PRELIMINARY fit.
+        # K1 has no mode choice, so the combo is disabled there.
+        self.ngs_wfs = QtWidgets.QComboBox()
+        self.ngs_wfs.addItems(list(engine.NGS_WFS_MODES))
+        self.ngs_wfs.setCurrentText(getattr(self.defaults, "ngs_wfs",
+                                            engine.DEF_NGS_WFS))
+        _g29 = engine.NGS_PARAMS_K2_WFS["29x29"]
+        self.ngs_wfs.setToolTip(
+            "K2 NGS WFS mode (selects the Gompertz fit loaded above).\n"
+            f"57x57: HAKA N53 fit (S₀ {_k2['S0']:g}, A {_k2['A']:g}, "
+            f"m₀ {_k2['m0']:g}, w {_k2['w']:g}).\n"
+            f"29x29: PRELIMINARY fit (S₀ {_g29['S0']:g}, A {_g29['A']:g}, "
+            f"m₀ {_g29['m0']:g}, w {_g29['w']:g}) from four stars on one "
+            "night (2026-09-23),\nR 11.7-15.3; A and w tied to 57x57. "
+            "Crosses 57x57 at R 12.2. K2 only.")
+        reset_fit = QtWidgets.QPushButton("Reset fit")
+        reset_fit.setToolTip("Restore the active telescope / WFS mode's "
+                             "fitted values")
         reset_fit.clicked.connect(lambda: self._sync_ngs_fit_fields(force=True))
-        reset_fit.setMinimumWidth(100)   # floor, not text width (631045c)
-        f.addRow("", reset_fit)
+        reset_fit.setMinimumWidth(70)    # floor, not text width (631045c)
+        _wfs_row = QtWidgets.QHBoxLayout()
+        _wfs_row.setContentsMargins(0, 0, 0, 0)
+        _wfs_row.addWidget(self.ngs_wfs, 1)
+        _wfs_row.addWidget(reset_fit)
+        f.addRow("K2 NGS WFS:", _wfs_row)
 
         # live preview of the fit itself: K-band Strehl vs guide-star magnitude
         # at a few seeing values, redrawn as the terms are edited. Needs no data
@@ -124,8 +146,11 @@ class NgsTabMixin:
         self.seeing_law.currentTextChanged.connect(self._update_ngs_fit_plot)
         self.band_combo.currentTextChanged.connect(self._update_ngs_fit_plot)
         self.wl_enable.toggled.connect(self._update_ngs_fit_plot)
-        # repopulate the fit for the active telescope on telescope change
+        # repopulate the fit for the active telescope on telescope change,
+        # and for the selected WFS mode on a mode change (then recompute: a
+        # mode change does not re-prepare the night the way a telescope does)
         self.tel_k1.toggled.connect(self._sync_ngs_fit_fields)
+        self.ngs_wfs.currentTextChanged.connect(self._on_ngs_wfs_changed)
         self._sync_ngs_fit_fields()
         self._update_ngs_fit_plot()
         return self._scroll(w)
@@ -175,7 +200,10 @@ class NgsTabMixin:
         ax.set_xlim(R[0], R[-1]); ax.set_ylim(0, 1)
         ax.set_xlabel("NGS guide-star R (mag)", fontsize=8)
         ax.set_ylabel(f"Strehl @ {lam_label}", fontsize=8)
-        title = f"{tel} NGS fit preview — {lam_label}"
+        wfs = self._active_ngs_wfs()
+        title = (f"{tel} NGS fit preview — {lam_label}" if tel == "K1" else
+                 f"K2 NGS {wfs}{' (PRELIMINARY)' if wfs == '29x29' else ''}"
+                 f" fit preview — {lam_label}")
         if not is_k:
             title += "\n(extrapolated from the K-band fit)"
         ax.set_title(title, fontsize=8.5, fontweight="bold")
@@ -185,25 +213,42 @@ class NgsTabMixin:
         fig.tight_layout(pad=0.4)
         self.fit_canvas.draw_idle()
 
+    def _active_ngs_wfs(self):
+        """The NGS WFS mode in force: the combo on K2, always the default
+        (57x57) on K1, which has no mode choice."""
+        if self.tel_k1.isChecked():
+            return engine.DEF_NGS_WFS
+        return self.ngs_wfs.currentText()
+
+    def _on_ngs_wfs_changed(self, *_):
+        """WFS mode changed: load that mode's fit, then recompute."""
+        self._sync_ngs_fit_fields()
+        self._on_compute_changed()
+
     def _sync_ngs_fit_fields(self, *_, force=False):
-        """Load the active telescope's Gompertz fit into the editor fields
-        (the fit is telescope-specific, so switching telescope replaces them),
-        and grey the K1-only quadcell penalty off on K2. Signals are blocked
-        so this repopulation does not itself fire a recompute -- the telescope
-        toggle already triggers a re-prepare. `force` re-seeds even without a
-        telescope change (the Reset button)."""
+        """Load the active telescope's (and, on K2, WFS mode's) Gompertz fit
+        into the editor fields (the fit is telescope- and mode-specific, so
+        switching either replaces them), and grey the K1-only quadcell
+        penalty off on K2 and the K2-only WFS mode off on K1. Signals are
+        blocked so this repopulation does not itself fire a recompute -- the
+        telescope toggle already triggers a re-prepare, and a mode change
+        recomputes in _on_ngs_wfs_changed. `force` re-seeds even without a
+        change (the Reset button)."""
         tel = "K1" if self.tel_k1.isChecked() else "K2"
-        if not force and getattr(self, "_ngs_fit_tel", None) == tel:
-            self.k1_quadcell.setEnabled(tel == "K1")
+        wfs = self._active_ngs_wfs()
+        self.k1_quadcell.setEnabled(tel == "K1")
+        self.ngs_wfs.setEnabled(tel == "K2")
+        if (not force and getattr(self, "_ngs_fit_tel", None) == tel
+                and getattr(self, "_ngs_fit_wfs", None) == wfs):
             return
         self._ngs_fit_tel = tel
-        par = engine.NGS_PARAMS[tel]
+        self._ngs_fit_wfs = wfs
+        par = engine.ngs_fit_params(tel, wfs)
         for sp, key in ((self.ngs_s0, "S0"), (self.ngs_a, "A"),
                         (self.ngs_m0, "m0"), (self.ngs_w, "w")):
             sp.blockSignals(True)
             sp.setValue(par[key])
             sp.blockSignals(False)
-        self.k1_quadcell.setEnabled(tel == "K1")
         self._update_ngs_fit_plot()          # fields changed under blockSignals
         if force and self.prep is not None:
             self._schedule("recompute")

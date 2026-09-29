@@ -14,14 +14,30 @@ from .marechal import marechal_strehl
 #  Two distinct fits are kept, one per telescope, because K1 and K2 use
 #  different AO systems with different histories:
 #
-#   * K2 (HAKA-class): the on-sky HAKA fit. Bright-star ceiling 0.755, seeing
-#     exponent 0.738, Gompertz m0 = 13.76, w = 1.71. (Report Figure 5, maroon.)
-#     REFIT 2026-08-07 (Eduardo) after new data was added to the HAKA set;
-#     the previous fit was 0.751 / 0.702 / 13.43 / 1.53. The refit is a mild
-#     move in every term: a hair more ceiling, slightly more seeing
-#     sensitivity, and a faint end that both starts ~0.33 mag later and rolls
-#     off more gently (w 1.53 -> 1.71), so the biggest changes land in the
-#     m ~ 13-16 range rather than at the bright end.
+#   * K2 (HAKA-class): the on-sky HAKA fit, 57x57 WFS mode. Bright-star
+#     ceiling 0.747, seeing exponent 0.661, Gompertz m0 = 13.62, w = 1.58
+#     (the N53 fit, 2026-09-23: 52 points, UT 2026-09-23 added; HAKA NGS
+#     report rev27, keck_ao_experiments/HAKA NGS fit and report/
+#     fit_output_N53.txt). Adopted 2026-09-28 (Eduardo). Previous fits:
+#     N49 0.755 / 0.738 / 13.76 / 1.71 (refit 2026-08-07; report rev26) and
+#     before that 0.751 / 0.702 / 13.43 / 1.53. N49 -> N53 is a mild move:
+#     the ceiling and seeing sensitivity drop slightly and the faint end
+#     starts ~0.1 mag earlier and rolls off a little faster (w 1.71 -> 1.58).
+#     At 0.5" DIMM (K seeing 0.37"): R 8 +0.004, R 12 -0.001, R 14 -0.025,
+#     R 15 -0.024 Strehl.
+#
+#   * K2 29x29 WFS mode (PRELIMINARY, see NGS_PARAMS_K2_WFS): the HAKA WFS
+#     can also run 29x29 subapertures, which get 4x the flux each. Fit from
+#     four stars on ONE night (2026-09-21/23 campaign; 09-23 data only,
+#     R 11.7-15.3, K seeing 0.48-0.50") -- haka_29x29_fit.py primary variant:
+#     the seeing exponent A and the width w are TIED to the 57x57 fit (seeing
+#     acts on both modes alike; the Gompertz faint term is the noise term,
+#     which 4x flux only shifts fainter), the ceiling is free but capped at
+#     the fitting-error bound 0.965x the 57x57 ceiling, and the points are
+#     divided by the same-night 57x57/model factor (x1.247). Result: ceiling
+#     0.614 (0.82x 57x57), m0 = 14.64 (+1.02 mag), crossing 57x57 at R 12.2.
+#     57x57 is ~17 % better on bright stars; 29x29 is x1.5 at R 14 and x2.6 at
+#     R 15. Outside R 11.7-15.3 it is an extrapolation.
 #
 #   * K1 (pre-HAKA RTC + OCAM2K class): the historical RTC+OCAM reference curve
 #     (Report Figure 5, purple). Reconstructed from that curve's constraints
@@ -41,9 +57,31 @@ from .marechal import marechal_strehl
 #           factor that brings the modeled K1 NGS into line with the ~5-point
 #           historical under-performance vs K2.
 NGS_PARAMS = {
-    "K2": dict(S0=0.755, A=0.738, m0=13.76, w=1.71),   # HAKA refit 2026-08-07
+    "K2": dict(S0=0.747, A=0.661, m0=13.62, w=1.58),   # HAKA N53, 57x57
     "K1": dict(S0=0.61,  A=1.00,  m0=15.73, w=1.53),
 }
+#  K2 NGS fit per WFS mode. "57x57" IS NGS_PARAMS["K2"] (the same dict).
+#  K1 has no WFS-mode choice: asking for 29x29 on K1 is an error.
+NGS_WFS_MODES = ("57x57", "29x29")
+DEF_NGS_WFS = "57x57"
+NGS_PARAMS_K2_WFS = {
+    "57x57": NGS_PARAMS["K2"],
+    "29x29": dict(S0=0.614, A=0.661, m0=14.64, w=1.58),   # PRELIMINARY
+}
+
+
+def ngs_fit_params(telescope, ngs_wfs=None):
+    """The reference Gompertz fit (dict S0/A/m0/w) for a telescope and NGS
+    WFS mode. ngs_wfs None -> DEF_NGS_WFS. Returns the module dict itself:
+    callers must copy before editing."""
+    wfs = DEF_NGS_WFS if ngs_wfs is None else str(ngs_wfs)
+    if wfs not in NGS_WFS_MODES:
+        raise ValueError(f"ngs_wfs must be one of {NGS_WFS_MODES}, not {wfs!r}")
+    if telescope == "K2":
+        return NGS_PARAMS_K2_WFS[wfs]
+    if wfs != DEF_NGS_WFS:
+        raise ValueError(f"the {wfs} NGS WFS mode exists on K2 only")
+    return NGS_PARAMS[telescope]
 NGS_K1_QUADCELL_PENALTY = 0.05    # flat Strehl subtracted on K1 (quadcell sat.)
 
 #  NGS SEEING LAW (revised 2026-07 after the HIP 88553 high-airmass validation).
@@ -69,7 +107,7 @@ NGS_SK_ANCHOR  = 0.30             # K-band anchor: mid calibration range 0.19-0.
 
 def ngs_strehl(eps_total_500nm, mag, telescope="K2", lam_nm=LAMBDA_K_NM,
                seeing_law=None, ngs_s0=None, ngs_a=None, ngs_m0=None,
-               ngs_w=None, k1_quadcell=None):
+               ngs_w=None, k1_quadcell=None, ngs_wfs=None):
     """NGS Strehl for total seeing + guide-star magnitude, at wavelength lam_nm.
 
     seeing_law: "kolmogorov" (default, module constant NGS_SEEING_LAW) uses the
@@ -79,7 +117,9 @@ def ngs_strehl(eps_total_500nm, mag, telescope="K2", lam_nm=LAMBDA_K_NM,
     extrapolated beyond the ~0.19-0.38" K-band calibration range.
 
     Uses a separate Gompertz fit per telescope (see NGS_PARAMS):
-      * K2  -> on-sky HAKA fit (ceiling 0.755, seeing exponent 0.738).
+      * K2  -> on-sky HAKA N53 fit (ceiling 0.747, seeing exponent 0.661);
+               ngs_wfs="29x29" selects the PRELIMINARY 29x29-mode fit
+               (NGS_PARAMS_K2_WFS). None -> "57x57". K1 accepts only 57x57.
       * K1  -> historical RTC+OCAM reference (ceiling 0.61), with a steeper
                seeing exponent (1.0) for DM-stroke saturation, and a flat
                -0.05 Strehl penalty for the KAPA PRO quadcell saturation effect.
@@ -95,7 +135,7 @@ def ngs_strehl(eps_total_500nm, mag, telescope="K2", lam_nm=LAMBDA_K_NM,
     # m0, roll-off width w) may be overridden for the ACTIVE telescope; None
     # keeps that telescope's fitted value. The K1 quadcell penalty is a
     # separate post-fit K1-only term.
-    par = dict(NGS_PARAMS[telescope])
+    par = dict(ngs_fit_params(telescope, ngs_wfs))
     if ngs_s0 is not None: par["S0"] = float(ngs_s0)
     if ngs_a  is not None: par["A"]  = float(ngs_a)
     if ngs_m0 is not None: par["m0"] = float(ngs_m0)

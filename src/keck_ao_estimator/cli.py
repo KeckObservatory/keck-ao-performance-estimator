@@ -20,7 +20,8 @@ from .constants import (
 )
 from .config import resolve_lgs_offset
 from .export import write_csv_table
-from .ngs import NGS_K1_QUADCELL_PENALTY, NGS_PARAMS, NGS_SEEING_LAW, NGS_SK_ANCHOR
+from .ngs import (NGS_K1_QUADCELL_PENALTY, NGS_PARAMS, NGS_SEEING_LAW, NGS_SK_ANCHOR,
+                  DEF_NGS_WFS, NGS_PARAMS_K2_WFS, NGS_WFS_MODES)
 from .pipeline import compute_timeline, prepare_night
 from .plots import (
     overlay_fwhm_on_main, render_fwhm_figure, render_main_figure,
@@ -201,6 +202,15 @@ def build_parser():
                             "(sK=%g\"): identical inside the calibrated range "
                             "(<0.005 Strehl), physically-paced roll-off beyond "
                             "it." % NGS_SK_ANCHOR)
+
+    _g29 = NGS_PARAMS_K2_WFS["29x29"]
+    g_ngs.add_argument("--ngs-wfs", choices=list(NGS_WFS_MODES),
+                       default=DEF_NGS_WFS,
+                       help="K2 NGS WFS mode, which selects the Gompertz fit: "
+                            "'57x57' = the HAKA N53 fit; '29x29' = the "
+                            "PRELIMINARY 29x29-mode fit (4 stars, one night, "
+                            "R 11.7-15.3; S0=%g A=%g m0=%g w=%g). K2 only."
+                            % (_g29["S0"], _g29["A"], _g29["m0"], _g29["w"]))
 
     # NGS Gompertz-fit overrides for the ACTIVE telescope (recalibration of the
     # empirical on-sky fit, not a what-if): S = S0 * exp(-A sK^2) *
@@ -457,6 +467,10 @@ def build_parser():
 
 
 def main(args):
+    if (getattr(args, "ngs_wfs", DEF_NGS_WFS) != DEF_NGS_WFS
+            and args.telescope != "K2"):
+        raise SystemExit(f"ERROR: --ngs-wfs {args.ngs_wfs} is a K2 (HAKA) "
+                         f"mode; {args.telescope} has no WFS-mode choice")
     # value-set selection first: everything downstream reads the module
     # globals (the GUI never passes through here -- its version picker goes
     # through the slider/override machinery instead)
@@ -534,6 +548,8 @@ def main(args):
              f" (floor-frac {args.ltao_bw_floor_frac:g})" if tomography_on
              and not args.legacy_budget else "")
           + f"  NGS seeing law: {args.ngs_seeing_law}"
+          + (f"  NGS WFS: {args.ngs_wfs} (PRELIMINARY fit)"
+             if getattr(args, "ngs_wfs", DEF_NGS_WFS) != DEF_NGS_WFS else "")
           + (f"  NGS offset: {args.ngs_offset:g}\" (aniso-corrected"
              + (f"; assumed theta0={args.assumed_theta0:g}\" on {n_fb} samples" if n_fb else "")
              + ")" if float(args.ngs_offset or 0.0) > 0.0 else ""))

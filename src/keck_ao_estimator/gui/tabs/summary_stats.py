@@ -184,7 +184,11 @@ class SummaryStatsMixin:
         # don't use the fit -- didn't). The other telescope gets its OWN
         # engine-default fit; any user fit edit applies only to the
         # telescope it was edited under, same as everywhere else.
-        par = engine.NGS_PARAMS[other_args.telescope]
+        # the WFS mode carries over only to K2 (K1 has no mode choice)
+        other_args.ngs_wfs = (self.ngs_wfs.currentText()
+                              if other_args.telescope == "K2"
+                              else engine.DEF_NGS_WFS)
+        par = engine.ngs_fit_params(other_args.telescope, other_args.ngs_wfs)
         other_args.ngs_s0 = par["S0"]
         other_args.ngs_a = par["A"]
         other_args.ngs_m0 = par["m0"]

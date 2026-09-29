@@ -529,6 +529,9 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         a.ngs_a = float(self.ngs_a.value())
         a.ngs_m0 = float(self.ngs_m0.value())
         a.ngs_w = float(self.ngs_w.value())
+        # the mode in force (K1 has none -> 57x57); the engine reads this
+        # through getattr, so it MUST be set here (2026-09-04 landmine)
+        a.ngs_wfs = self._active_ngs_wfs()
         a.k1_quadcell_penalty = float(self.k1_quadcell.value())
 
         # --- Budget ---
@@ -1062,6 +1065,8 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             "ngs_s0": self.ngs_s0.value(), "ngs_a": self.ngs_a.value(),
             "ngs_m0": self.ngs_m0.value(), "ngs_w": self.ngs_w.value(),
             "ngs_fit_tel": self._ngs_fit_tel,
+            "ngs_wfs": self.ngs_wfs.currentText(),
+            "ngs_fit_wfs": self._ngs_fit_wfs,
             "k1_quadcell": self.k1_quadcell.value(),
             "tt_sensor": self.tt_sensor.currentText(),
             "tt_mag": self.tt_mag.value(), "tt_offset": self.tt_offset.value(),
@@ -1142,6 +1147,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                    self.ngs_bright, self.ngs_faint,
                    self.assumed_theta0, self.seeing_law,
                    self.ngs_s0, self.ngs_a, self.ngs_m0, self.ngs_w,
+                   self.ngs_wfs,
                    self.k1_quadcell, self.tt_sensor, self.tt_mag, self.laser_pa,
                    self.lgs_offset, self.ltao_floor, self.ltao_tt_gain,
                    self.tomo_combo, self.lgs_flux_cb, self.windows_list, self.za_spin,
@@ -1213,12 +1219,20 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                 self.ngs_offset.setValue(c.get("ngs_offset", 0.0))
             self.assumed_theta0.setValue(c.get("assumed_theta0", 15.0))
             self.seeing_law.setCurrentText(c.get("seeing_law", "kolmogorov"))
-            # Gompertz fit: seed from the (already-set) telescope's default,
-            # then overlay any saved values. Pin _ngs_fit_tel so the end-of-
-            # apply _sync does not repopulate over these.
+            # Gompertz fit: seed from the (already-set) telescope's and WFS
+            # mode's default, then overlay any saved values. Pin
+            # _ngs_fit_tel/_ngs_fit_wfs so the end-of-apply _sync does not
+            # repopulate over these. A config from before the WFS mode
+            # existed has no ngs_wfs: 57x57. Its saved spin values are the
+            # old N49 fit, which the overlay keeps -- Reset fit loads N53.
             _tel = "K1" if self.tel_k1.isChecked() else "K2"
-            _par = engine.NGS_PARAMS[_tel]
+            _wfs = c.get("ngs_wfs", engine.DEF_NGS_WFS)
+            if _wfs not in engine.NGS_WFS_MODES:
+                _wfs = engine.DEF_NGS_WFS
+            self.ngs_wfs.setCurrentText(_wfs)
+            _par = engine.ngs_fit_params(_tel, self._active_ngs_wfs())
             self._ngs_fit_tel = c.get("ngs_fit_tel", _tel)
+            self._ngs_fit_wfs = c.get("ngs_fit_wfs", self._active_ngs_wfs())
             self.ngs_s0.setValue(c.get("ngs_s0", _par["S0"]))
             self.ngs_a.setValue(c.get("ngs_a", _par["A"]))
             self.ngs_m0.setValue(c.get("ngs_m0", _par["m0"]))

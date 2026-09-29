@@ -2715,7 +2715,8 @@ class Nirc2StrehlTabMixin:
                         ngs_a=self.args_cached.ngs_a,
                         ngs_m0=self.args_cached.ngs_m0,
                         ngs_w=self.args_cached.ngs_w,
-                        k1_quadcell=self.args_cached.k1_quadcell_penalty)
+                        k1_quadcell=self.args_cached.k1_quadcell_penalty,
+                        ngs_wfs=getattr(self.args_cached, "ngs_wfs", None))
                     if np.isfinite(s_real) and 0.0 < s_real < 1.0:
                         s_conv = float(s_real)
                         real_mag_used = real_mag

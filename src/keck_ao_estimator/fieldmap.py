@@ -308,7 +308,8 @@ def _field_context(args, prep, snap, mode, metric, ngs_xy, tt_xy, laser_xy,
     n_act = DM_ACTUATORS_ACROSS[tel]
     fitkw = dict(seeing_law=args.ngs_seeing_law, ngs_s0=args.ngs_s0,
                  ngs_a=args.ngs_a, ngs_m0=args.ngs_m0, ngs_w=args.ngs_w,
-                 k1_quadcell=args.k1_quadcell_penalty)
+                 k1_quadcell=args.k1_quadcell_penalty,
+                 ngs_wfs=getattr(args, "ngs_wfs", None))
     # aniso re-weighting: 1.0 for night snapshots (reference-shape budget,
     # keeps the on-axis value identical to the timeline's science estimate);
     # synthetic snapshots carry the theta0-decoupling factor

@@ -246,7 +246,8 @@ def compute_timeline(args, prep):
         _nkw = dict(seeing_law=args.ngs_seeing_law,
                     ngs_s0=args.ngs_s0, ngs_a=args.ngs_a,
                     ngs_m0=args.ngs_m0, ngs_w=args.ngs_w,
-                    k1_quadcell=args.k1_quadcell_penalty)
+                    k1_quadcell=args.k1_quadcell_penalty,
+                    ngs_wfs=getattr(args, "ngs_wfs", None))
         s_b = ngs_strehl(eps_tot_los, args.ngs_bright, args.telescope, lam_nm,
                          **_nkw)
         s_f = ngs_strehl(eps_tot_los, args.ngs_faint, args.telescope, lam_nm,

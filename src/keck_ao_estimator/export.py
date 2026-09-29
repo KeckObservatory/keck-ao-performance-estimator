@@ -12,7 +12,7 @@ from .constants import (
     DM_ACTUATORS_ACROSS, HST_TO_UTC_HOURS, MOFFAT_BETA_KOLM, TEL_DIAMETER_M,
     V_FREE, V_GROUND,
 )
-from .ngs import NGS_K1_QUADCELL_PENALTY, NGS_PARAMS, NGS_SK_ANCHOR
+from .ngs import DEF_NGS_WFS, NGS_K1_QUADCELL_PENALTY, NGS_SK_ANCHOR, ngs_fit_params
 from .tiptilt import DEF_LTAO_TT_THETA0_GAIN, NGS_TILT_SERVO_MAS
 
 
@@ -147,6 +147,8 @@ def write_csv_table(args, prep, res, csv_path):
             _extra = []
             if getattr(args, "instrument", None):
                 _extra.append(f"instrument={_inst}")
+            if getattr(args, "ngs_wfs", DEF_NGS_WFS) != DEF_NGS_WFS:
+                _extra.append(f"ngs_wfs={args.ngs_wfs}(PRELIMINARY_fit)")
             if getattr(args, "lgs_flux_model", False) and not args.legacy_budget:
                 _extra.append("lgs_flux_model=on(meas_term_scaled_by_return_vs_az_el)")
             if _extra:
@@ -168,7 +170,7 @@ def write_csv_table(args, prep, res, csv_path):
                          f"reference {V_GROUND:g}/{V_FREE:g})\n")
             # non-default NGS Gompertz fit (recalibration, not budget what-if);
             # absent at the reference values so reference outputs are unchanged.
-            _gp = NGS_PARAMS[_tel]
+            _gp = ngs_fit_params(_tel, getattr(args, "ngs_wfs", None))
             _gov = []
             for _flag, _key in (("ngs_s0", "S0"), ("ngs_a", "A"),
                                 ("ngs_m0", "m0"), ("ngs_w", "w")):

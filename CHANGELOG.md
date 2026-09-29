@@ -3,6 +3,41 @@
 All notable changes to the Keck AO Performance Estimator. The project
 is released on GitHub only (pin `@v1.3.0` in the install URL).
 
+## Unreleased
+
+### Changed
+- **K2 NGS: the 57x57 fit is now the HAKA N53 fit.** The ceiling is 0.747,
+  A 0.661, m₀ 13.62 and w 1.58 (it was N49: 0.755 / 0.738 / 13.76 / 1.71).
+  N53 adds the UT 2026-09-23 points (HAKA NGS report rev27).
+  - At 0.5″ DIMM the K2 NGS Strehl moves by +0.004 at R 8, −0.001 at
+    R 12, −0.025 at R 14 and −0.024 at R 15.
+  - K1 is unchanged.
+  - The regression references for the two K2 scenarios were updated, and
+    only their NGS columns changed.
+  - A config saved earlier keeps the fit values it saved. **Reset fit**
+    loads N53.
+
+### Added
+- **K2 NGS WFS mode.** `--ngs-wfs {57x57,29x29}` on the CLI; on the GUI,
+  the **K2 NGS WFS** selector on the NGS tab, which shares a row with
+  **Reset fit**.
+  - `29x29` selects a **preliminary** fit: ceiling 0.614, A 0.661,
+    m₀ 14.64, w 1.58.
+  - The fit uses four stars from one night (2026-09-23), R 11.7–15.3.
+    A and w are tied to 57x57, and the ceiling is capped at 0.965× the
+    57x57 ceiling.
+  - It crosses 57x57 at R 12.2. It is ×1.5 at R 14 and ×2.6 at R 15, and
+    about 17 % lower on bright stars. Outside R 11.7–15.3 it is an
+    extrapolation.
+  - The mode exists on K2 only: the CLI refuses it on K1, and the GUI
+    disables the selector there.
+  - A non-default mode is recorded in the CSV provenance
+    (`ngs_wfs=29x29(PRELIMINARY_fit)`) and in the run summary.
+  - The Gompertz fields still override on top of the selected fit.
+  - Engine: `ngs_strehl(..., ngs_wfs=)`, `ngs_fit_params()`,
+    `NGS_PARAMS_K2_WFS`, `NGS_WFS_MODES`, `DEF_NGS_WFS`.
+  - Regression test `gui_phase46`.
+
 ## 1.3.0 — 2026-09-22
 
 ### Added
