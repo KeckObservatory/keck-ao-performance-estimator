@@ -3,6 +3,21 @@
 All notable changes to the Keck AO Performance Estimator. The project
 is released on GitHub only (pin `@v1.3.1` in the install URL).
 
+## Unreleased
+
+### Fixed
+- **Field map in a Prediction scenario with no night Run.** The map draws
+  there, but its clicks and **Rank** were dead:
+  - right-clicking a catalogue star gave no menu, so there was no "Set as
+    TT/NGS star";
+  - left-click inspect did nothing;
+  - Rank returned silently, so the ranked table never opened.
+
+  All three now work in that mode. Rank uses the same no-run model inputs
+  the map is drawn with. With no Run and no Prediction scenario, Rank now
+  says "Run first — or enable the Prediction scenario — to rank" instead of
+  doing nothing. Present since v1.0.0. Regression test `gui_phase47`.
+
 ## 1.3.1 — 2026-09-28
 
 ### Changed

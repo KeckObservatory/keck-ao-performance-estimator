@@ -145,7 +145,12 @@ class FieldMapOverlaysMixin:
         the plot frame (x = West+, y = North+ arcsec from the field centre)."""
         if event.inaxes is None or event.xdata is None:
             return
-        if self.res is None or self.plot_tabs.currentIndex() != 1:
+        if self.plot_tabs.currentIndex() != 1:
+            return
+        # the map also renders a Prediction scenario with no night Run
+        # (2026-08-12); its clicks must work there too (2026-09-28: right-
+        # click and Rank were dead in prediction mode before a Run)
+        if self.res is None and not self.pred_enable.isChecked():
             return
         x, y = float(event.xdata), float(event.ydata)
         if event.button == 1:                          # inspect (no drag/zoom)
@@ -628,14 +633,23 @@ class FieldMapOverlaysMixin:
         TARGET (the field centre). Badges the top 3 on the map and opens the
         full ranked table."""
         stars = self._catalog_stars_xy()
-        if not stars or self.prep is None or self.res is None:
+        if not stars:
             return
-        if self.pred_enable.isChecked():
+        pred_on = self.pred_enable.isChecked()
+        if not pred_on and (self.prep is None or self.res is None):
+            self.fm_catalog_status.setText(
+                "Run first — or enable the Prediction scenario — to rank")
+            return
+        # a Prediction scenario needs no Run (2026-08-12): rank against the
+        # same no-run surrogate prep the map itself is drawn with
+        if pred_on:
             snap = self._pred_snapshot()
+            prep = self._fm_prep()
         else:
             when, t_hst = self._fm_when_time()
             snap = engine.field_snapshot(self.args_cached, self.prep, self.res,
                                          when, t_hst)
+            prep = self.prep
         if snap is None:
             self.fm_catalog_status.setText(
                 "field map needs MASS profiles (none this night) — can't rank")
@@ -657,14 +671,20 @@ class FieldMapOverlaysMixin:
         # recompute_and_draw). Found 2026-09-04 once collect_args started
         # resolving the sensor; before that every ranking was silently STRAP.
         try:
-            args = self.collect_args(self.args_cached.out)
+            args = self.collect_args(self.args_cached.out
+                                     if self.args_cached is not None else "")
         except Exception:
-            args = self.args_cached
+            args = self._fm_args() if pred_on else self.args_cached
+        if args is None:
+            self.fm_catalog_status.setText(
+                "can't rank: fix the control inputs (a field could not be "
+                "parsed)")
+            return
         fm_dvar = (self._ngs_delta_var(self.last_offsets, args)
                   if (mode == "ngs" and self.last_offsets) else 0.0)
         with engine.budget_overrides(**self.last_offsets):
             ranked = engine.rank_guide_stars(
-                args, self.prep, snap, mode, stars, laser_xy,
+                args, prep, snap, mode, stars, laser_xy,
                 sensor, metric=metric, ngs_delta_var=fm_dvar)
         self._gs_ranking = ranked
         n_ok = sum(1 for e in ranked if e["rank"] is not None)
