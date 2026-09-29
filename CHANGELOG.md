@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.3.0` in the install URL).
+is released on GitHub only (pin `@v1.3.1` in the install URL).
 
-## Unreleased
+## 1.3.1 — 2026-09-28
 
 ### Changed
 - **K2 NGS: the 57x57 fit is now the HAKA N53 fit.** The ceiling is 0.747,
