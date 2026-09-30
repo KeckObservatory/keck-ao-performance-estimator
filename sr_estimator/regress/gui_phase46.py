@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """K2 NGS fit per WFS mode (2026-09-28, Eduardo Marin): the K2 57x57 fit is
-the HAKA N53 fit, and a PRELIMINARY 29x29-mode fit is selectable (CLI
+the HAKA N53 fit (N57 since 2026-09-30), and a PRELIMINARY 29x29-mode fit
+(two nights since 2026-09-30) is selectable (CLI
 --ngs-wfs, GUI "K2 NGS WFS" combo on the NGS tab).
 
-Engine contract: NGS_PARAMS["K2"] is N53 and IS the 57x57 entry; the 29x29
+Engine contract: NGS_PARAMS["K2"] is N57 and IS the 57x57 entry; the 29x29
 fit ties A and w to 57x57, keeps its ceiling under the 0.965x fitting-error
 bound, and reproduces the fit's own numbers (haka_29x29_fit.py: 29x29 =
-57x57 at R 12.2, x1.5 at R 14 at 0.41" K seeing, gaussian form); K1 has no
+57x57 at R 11.84, x1.7 at R 14 at 0.41" K seeing, gaussian form); K1 has no
 29x29 mode (ValueError), and the default is 57x57.
 CLI: --ngs-wfs 29x29 changes only the NGS columns and records itself in the
 CSV provenance; on K1 it is refused.
@@ -30,8 +31,8 @@ import keck_ao_estimator.gui as gui
 from keck_ao_estimator import cli
 np = engine.np
 DATA = os.path.join(HERE, "data")
-N53 = dict(S0=0.747, A=0.661, m0=13.62, w=1.58)
-F29 = dict(S0=0.614, A=0.661, m0=14.64, w=1.58)
+N57 = dict(S0=0.747, A=0.696, m0=13.73, w=1.50)
+F29 = dict(S0=0.632, A=0.696, m0=15.06, w=1.50)
 
 
 def pump(cond, timeout=90):
@@ -61,7 +62,7 @@ def settle(n=6):
 
 
 def engine_contract():
-    assert engine.NGS_PARAMS["K2"] == N53, engine.NGS_PARAMS["K2"]
+    assert engine.NGS_PARAMS["K2"] == N57, engine.NGS_PARAMS["K2"]
     assert engine.NGS_PARAMS_K2_WFS["57x57"] is engine.NGS_PARAMS["K2"]
     assert engine.NGS_PARAMS_K2_WFS["29x29"] == F29
     assert engine.DEF_NGS_WFS == "57x57"
@@ -93,20 +94,20 @@ def engine_contract():
     eps = 0.41 / engine.V2K
     g = lambda R, w: engine.ngs_strehl(eps, R, "K2", ngs_wfs=w,   # noqa: E731
                                        seeing_law="gaussian")
-    for R, s29, s57 in ((8, 0.541, 0.650), (12, 0.456, 0.468),
-                        (14, 0.282, 0.187), (15, 0.157, 0.061)):
+    for R, s29, s57 in ((8, 0.557, 0.650), (12, 0.494, 0.485),
+                        (14, 0.343, 0.201), (15, 0.215, 0.065)):
         assert abs(g(R, "29x29") - s29) < 0.0015, (R, g(R, "29x29"), s29)
         assert abs(g(R, "57x57") - s57) < 0.0015, (R, g(R, "57x57"), s57)
     lo, hi = 10.0, 14.0                        # crossover by bisection
     for _ in range(50):
         mid = 0.5 * (lo + hi)
         lo, hi = (mid, hi) if g(mid, "29x29") < g(mid, "57x57") else (lo, mid)
-    assert abs(lo - 12.22) < 0.02, f"crossover R {lo:.3f}, fit says 12.22"
+    assert abs(lo - 11.84) < 0.02, f"crossover R {lo:.3f}, fit says 11.84"
     # overrides still apply on top of the selected mode's fit
-    assert engine.ngs_strehl(0.5, 14.0, "K2", ngs_wfs="29x29", ngs_m0=13.62) \
+    assert engine.ngs_strehl(0.5, 14.0, "K2", ngs_wfs="29x29", ngs_m0=13.73) \
         < engine.ngs_strehl(0.5, 14.0, "K2", ngs_wfs="29x29")
     assert engine.NGS_PARAMS_K2_WFS["29x29"] == F29, "module fit mutated"
-    print(f"  [ok] engine: K2 = N53, 29x29 tied A/w, ceiling "
+    print(f"  [ok] engine: K2 = N57, 29x29 tied A/w, ceiling "
           f"{p29['S0'] / p57['S0']:.3f}x, crossover R {lo:.2f}, K1 refuses")
 
 
@@ -178,7 +179,7 @@ def gui_contract():
     win.masspro_edit.setText(os.path.join(DATA, "20260525_masspro.dat"))
     win.tel_k2.setChecked(True); settle()
     assert win.ngs_wfs.currentText() == "57x57" and win.ngs_wfs.isEnabled()
-    assert fields(win) == N53, fields(win)
+    assert fields(win) == N57, fields(win)
     win.ngs_faint.setValue(14.0)
     win._validate(); win.on_run()
     pump(lambda: win.res is not None)
@@ -207,15 +208,15 @@ def gui_contract():
     assert not scroll.horizontalScrollBar().isVisible()
 
     # fit preview (mock-up B): the OTHER mode dashed at 0.5", the crossover
-    # (R 12.2, 29x29 better fainter) marked, the title not clipped
+    # (R 11.8, 29x29 better fainter) marked, the title not clipped
     dashed, xing, fits = preview(win)            # 29x29 active
     assert dashed == ['57x57 @ 0.5"'], dashed
-    assert xing and abs(xing[0] - 12.22) < 0.05 and xing[1] == "29x29", xing
+    assert xing and abs(xing[0] - 11.84) < 0.05 and xing[1] == "29x29", xing
     assert fits, "preview title clipped (29x29)"
     win.ngs_wfs.setCurrentText("57x57"); settle()
     dashed, xing, fits = preview(win)            # 57x57 active
     assert dashed == ['29x29 prelim @ 0.5"'], dashed
-    assert xing and abs(xing[0] - 12.22) < 0.05 and xing[1] == "29x29", xing
+    assert xing and abs(xing[0] - 11.84) < 0.05 and xing[1] == "29x29", xing
     assert fits, "preview title clipped (57x57)"
     prev = win.res
     win.ngs_wfs.setCurrentText("29x29")
@@ -254,7 +255,7 @@ def gui_contract():
     cfg = win._collect_config()
     assert cfg["ngs_wfs"] == "29x29"
     win.ngs_wfs.setCurrentText("57x57"); settle()
-    assert fields(win) == N53
+    assert fields(win) == N57
     win._apply_config(cfg); settle()
     assert win.ngs_wfs.currentText() == "29x29" and fields(win) == F29
     old = {k: v for k, v in cfg.items() if k not in ("ngs_wfs", "ngs_fit_wfs")}

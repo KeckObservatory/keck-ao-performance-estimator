@@ -207,9 +207,9 @@ def build_parser():
     g_ngs.add_argument("--ngs-wfs", choices=list(NGS_WFS_MODES),
                        default=DEF_NGS_WFS,
                        help="K2 NGS WFS mode, which selects the Gompertz fit: "
-                            "'57x57' = the HAKA N53 fit; '29x29' = the "
-                            "PRELIMINARY 29x29-mode fit (4 stars, one night, "
-                            "R 11.7-15.3; S0=%g A=%g m0=%g w=%g). K2 only."
+                            "'57x57' = the HAKA N57 fit; '29x29' = the "
+                            "PRELIMINARY 29x29-mode fit (10 stars, two nights, "
+                            "R 6.3-15.9; S0=%g A=%g m0=%g w=%g). K2 only."
                             % (_g29["S0"], _g29["A"], _g29["m0"], _g29["w"]))
 
     # NGS Gompertz-fit overrides for the ACTIVE telescope (recalibration of the

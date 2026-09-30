@@ -1224,7 +1224,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             # _ngs_fit_tel/_ngs_fit_wfs so the end-of-apply _sync does not
             # repopulate over these. A config from before the WFS mode
             # existed has no ngs_wfs: 57x57. Its saved spin values are the
-            # old N49 fit, which the overlay keeps -- Reset fit loads N53.
+            # old N49 fit, which the overlay keeps -- Reset fit loads N57.
             _tel = "K1" if self.tel_k1.isChecked() else "K2"
             _wfs = c.get("ngs_wfs", engine.DEF_NGS_WFS)
             if _wfs not in engine.NGS_WFS_MODES:

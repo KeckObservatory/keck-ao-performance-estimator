@@ -90,7 +90,7 @@ class NgsTabMixin:
 
         # K2 NGS WFS mode + reset-to-fit button, sharing ONE row so the tab
         # does not grow (the dock never scrolls). The mode selects which fit
-        # seeds the fields: 57x57 = HAKA N53, 29x29 = the PRELIMINARY fit.
+        # seeds the fields: 57x57 = HAKA N57, 29x29 = the PRELIMINARY fit.
         # K1 has no mode choice, so the combo is disabled there.
         self.ngs_wfs = QtWidgets.QComboBox()
         self.ngs_wfs.addItems(list(engine.NGS_WFS_MODES))
@@ -99,12 +99,12 @@ class NgsTabMixin:
         _g29 = engine.NGS_PARAMS_K2_WFS["29x29"]
         self.ngs_wfs.setToolTip(
             "K2 NGS WFS mode (selects the Gompertz fit loaded above).\n"
-            f"57x57: HAKA N53 fit (S₀ {_k2['S0']:g}, A {_k2['A']:g}, "
+            f"57x57: HAKA N57 fit (S₀ {_k2['S0']:g}, A {_k2['A']:g}, "
             f"m₀ {_k2['m0']:g}, w {_k2['w']:g}).\n"
             f"29x29: PRELIMINARY fit (S₀ {_g29['S0']:g}, A {_g29['A']:g}, "
-            f"m₀ {_g29['m0']:g}, w {_g29['w']:g}) from four stars on one "
-            "night (2026-09-23),\nR 11.7-15.3; A and w tied to 57x57. "
-            "Crosses 57x57 at R 12.2. K2 only.")
+            f"m₀ {_g29['m0']:g}, w {_g29['w']:g}) from ten stars on two "
+            "nights (2026-09-23, 09-30),\nR 6.3-15.9; A and w tied to 57x57. "
+            "Crosses 57x57 at R 11.8. K2 only.")
         reset_fit = QtWidgets.QPushButton("Reset fit")
         reset_fit.setToolTip("Restore the active telescope / WFS mode's "
                              "fitted values")

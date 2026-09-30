@@ -1,9 +1,30 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.3.1` in the install URL).
+is released on GitHub only (pin `@v1.3.2` in the install URL).
 
-## Unreleased
+## 1.3.2 — 2026-09-30
+
+### Changed
+- **K2 NGS: the 57x57 fit is now the HAKA N57 fit.** The ceiling is 0.747,
+  A 0.696, m₀ 13.73 and w 1.50 (it was N53: 0.747 / 0.661 / 13.62 / 1.58).
+  N57 adds five stars from UT 2026-09-30 (R 6.3–13.2); the half-Strehl knee
+  moves from R 13.04 to 13.17.
+  - At 0.5″ DIMM the K2 NGS Strehl moves by +0.001 at R 8, +0.019 at
+    R 12, +0.014 at R 14 and +0.004 at R 15.
+  - K1 is unchanged.
+  - The regression references for the two K2 scenarios were updated, and
+    only their NGS columns changed.
+  - A config saved earlier keeps the fit values it saved. **Reset fit**
+    loads N57.
+- **K2 NGS 29x29 (preliminary) fit refit on two nights** (2026-09-23 and
+  2026-09-30, ten stars, R 6.3–15.9, each night normalised by its own
+  57x57/model factor): ceiling 0.632, A 0.696, m₀ 15.06, w 1.50 (it was
+  0.614 / 0.661 / 14.64 / 1.58). A and w stay tied to 57x57.
+  - It now crosses 57x57 at R 11.8 (was 12.2); it is ×1.7 at R 14 and ×3.3
+    at R 15, and about 15 % lower on bright stars. The bright end is now
+    measured (R 6.3), not extrapolated. It stays labelled preliminary: the
+    faint end scatters night to night (χ² 54 for 8 degrees of freedom).
 
 ### Fixed
 - **Field map in a Prediction scenario with no night Run.** The map draws

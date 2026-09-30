@@ -14,8 +14,8 @@ The GUI is organised as tabs that feed one shared engine:
   optional arcsec target offset, and a saved-target list.
 - **NGS / LGS / WFE** — guide-star magnitudes, the laser/LTAO configuration, the
   tip-tilt sensor (STRAP or TRICK), and the error-budget sliders. On K2 the
-  NGS tab's **K2 NGS WFS** selector picks the 57x57 fit or the preliminary
-  29x29 fit (`--ngs-wfs` on the CLI).
+  NGS tab's **K2 NGS WFS** selector picks the 57x57 fit (HAKA N57) or the
+  preliminary 29x29 fit (two nights; `--ngs-wfs` on the CLI).
 - **Prediction** — a hypothetical-conditions scenario: a DIMM/MASS seeing
   pair (*Scenario*), or the turbulence set **by layer** on the *Layers*
   sub-tab as turbulence **fractions** on the LTAO reconstructor's altitude

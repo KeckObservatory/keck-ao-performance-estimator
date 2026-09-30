@@ -15,29 +15,31 @@ from .marechal import marechal_strehl
 #  different AO systems with different histories:
 #
 #   * K2 (HAKA-class): the on-sky HAKA fit, 57x57 WFS mode. Bright-star
-#     ceiling 0.747, seeing exponent 0.661, Gompertz m0 = 13.62, w = 1.58
-#     (the N53 fit, 2026-09-23: 52 points, UT 2026-09-23 added; HAKA NGS
-#     report rev27, keck_ao_experiments/HAKA NGS fit and report/
-#     fit_output_N53.txt). Adopted 2026-09-28 (Eduardo). Previous fits:
-#     N49 0.755 / 0.738 / 13.76 / 1.71 (refit 2026-08-07; report rev26) and
-#     before that 0.751 / 0.702 / 13.43 / 1.53. N49 -> N53 is a mild move:
-#     the ceiling and seeing sensitivity drop slightly and the faint end
-#     starts ~0.1 mag earlier and rolls off a little faster (w 1.71 -> 1.58).
-#     At 0.5" DIMM (K seeing 0.37"): R 8 +0.004, R 12 -0.001, R 14 -0.025,
-#     R 15 -0.024 Strehl.
+#     ceiling 0.747, seeing exponent 0.696, Gompertz m0 = 13.73, w = 1.50
+#     (the N57 fit, 2026-09-30: 57 points, UT 2026-09-30 added -- five stars,
+#     R 6.3-13.2; keck_ao_experiments/HAKA NGS fit and report/
+#     fit_output_N57.txt, FIT_UPDATE_20260930.md). Adopted 2026-09-30
+#     (Eduardo). Previous fits: N53 0.747 / 0.661 / 13.62 / 1.58 (adopted
+#     2026-09-28, v1.3.1), N49 0.755 / 0.738 / 13.76 / 1.71 (report rev26)
+#     and before that 0.751 / 0.702 / 13.43 / 1.53. N53 -> N57: the knee moves
+#     0.13 mag fainter (13.04 -> 13.17), the seeing exponent rises a little.
+#     At 0.5" DIMM (K seeing 0.37"): R 8 +0.001, R 12 +0.019, R 14 +0.014,
+#     R 15 +0.004 Strehl.
 #
 #   * K2 29x29 WFS mode (PRELIMINARY, see NGS_PARAMS_K2_WFS): the HAKA WFS
 #     can also run 29x29 subapertures, which get 4x the flux each. Fit from
-#     four stars on ONE night (2026-09-21/23 campaign; 09-23 data only,
-#     R 11.7-15.3, K seeing 0.48-0.50") -- haka_29x29_fit.py primary variant:
-#     the seeing exponent A and the width w are TIED to the 57x57 fit (seeing
-#     acts on both modes alike; the Gompertz faint term is the noise term,
-#     which 4x flux only shifts fainter), the ceiling is free but capped at
-#     the fitting-error bound 0.965x the 57x57 ceiling, and the points are
-#     divided by the same-night 57x57/model factor (x1.247). Result: ceiling
-#     0.614 (0.82x 57x57), m0 = 14.64 (+1.02 mag), crossing 57x57 at R 12.2.
-#     57x57 is ~17 % better on bright stars; 29x29 is x1.5 at R 14 and x2.6 at
-#     R 15. Outside R 11.7-15.3 it is an extrapolation.
+#     ten stars on TWO nights (UT 2026-09-23 and 2026-09-30, R 6.3-15.9,
+#     K seeing 0.26-0.50") -- haka_29x29_fit.py primary variant: the seeing
+#     exponent A and the width w are TIED to the 57x57 fit (seeing acts on
+#     both modes alike; the Gompertz faint term is the noise term, which 4x
+#     flux only shifts fainter), the ceiling is free but capped at the
+#     fitting-error bound 0.965x the 57x57 ceiling, and each night's points
+#     are divided by that night's 57x57/model factor (09-23 x1.22, 09-30
+#     x1.045). Result: ceiling 0.632 (0.85x 57x57), m0 = 15.06 (+1.33 mag),
+#     crossing 57x57 at R 11.8. 57x57 is ~15 % better on bright stars; 29x29
+#     is x1.7 at R 14 and x3.3 at R 15. chi2 54 for 8 dof: the faint end
+#     scatters night to night. Previous (v1.3.1, 09-23 only): 0.614 / 14.64,
+#     crossing R 12.2. Outside R 6.3-15.9 it is an extrapolation.
 #
 #   * K1 (pre-HAKA RTC + OCAM2K class): the historical RTC+OCAM reference curve
 #     (Report Figure 5, purple). Reconstructed from that curve's constraints
@@ -57,7 +59,7 @@ from .marechal import marechal_strehl
 #           factor that brings the modeled K1 NGS into line with the ~5-point
 #           historical under-performance vs K2.
 NGS_PARAMS = {
-    "K2": dict(S0=0.747, A=0.661, m0=13.62, w=1.58),   # HAKA N53, 57x57
+    "K2": dict(S0=0.747, A=0.696, m0=13.73, w=1.50),   # HAKA N57, 57x57
     "K1": dict(S0=0.61,  A=1.00,  m0=15.73, w=1.53),
 }
 #  K2 NGS fit per WFS mode. "57x57" IS NGS_PARAMS["K2"] (the same dict).
@@ -66,9 +68,9 @@ NGS_WFS_MODES = ("57x57", "29x29")
 DEF_NGS_WFS = "57x57"
 NGS_PARAMS_K2_WFS = {
     "57x57": NGS_PARAMS["K2"],
-    "29x29": dict(S0=0.614, A=0.661, m0=14.64, w=1.58),   # PRELIMINARY
+    "29x29": dict(S0=0.632, A=0.696, m0=15.06, w=1.50),   # PRELIMINARY (2 nights)
 }
-NGS_29X29_FIT_RANGE_R = (11.7, 15.3)   # WFS R of the stars behind the fit
+NGS_29X29_FIT_RANGE_R = (6.3, 15.9)    # WFS R of the stars behind the fit
 
 
 def ngs_fit_params(telescope, ngs_wfs=None):
@@ -118,7 +120,7 @@ def ngs_strehl(eps_total_500nm, mag, telescope="K2", lam_nm=LAMBDA_K_NM,
     extrapolated beyond the ~0.19-0.38" K-band calibration range.
 
     Uses a separate Gompertz fit per telescope (see NGS_PARAMS):
-      * K2  -> on-sky HAKA N53 fit (ceiling 0.747, seeing exponent 0.661);
+      * K2  -> on-sky HAKA N57 fit (ceiling 0.747, seeing exponent 0.696);
                ngs_wfs="29x29" selects the PRELIMINARY 29x29-mode fit
                (NGS_PARAMS_K2_WFS). None -> "57x57". K1 accepts only 57x57.
       * K1  -> historical RTC+OCAM reference (ceiling 0.61), with a steeper
