@@ -562,6 +562,15 @@ class Nirc2StrehlTabMixin:
         self.n2_map_metric.currentTextChanged.connect(
             lambda *_: self._nirc2_draw_map())
         fm_row.addWidget(self.n2_map_metric)
+        self.n2_map_show_image = QtWidgets.QCheckBox("Image")
+        self.n2_map_show_image.setToolTip(
+            "Draw the frame under the measured map, with hollow markers "
+            "(colour still carries the SR/FWHM value), so each marker can "
+            "be checked against its star. While on, 'Add star by click' "
+            "also works on this map. The pop-out has its own toggle.")
+        self.n2_map_show_image.toggled.connect(
+            lambda *_: self._nirc2_draw_map())
+        fm_row.addWidget(self.n2_map_show_image)
         self.n2_map_popout = QtWidgets.QPushButton("Pop out")
         self.n2_map_popout.setToolTip(
             "Open the field map in its own resizable window — drag the "
@@ -573,6 +582,8 @@ class Nirc2StrehlTabMixin:
         self.n2_map_fig = Figure(figsize=(4.6, 4.0), layout="constrained")
         self.n2_map_canvas = FigureCanvasQTAgg(self.n2_map_fig)
         self.n2_map_canvas.mpl_connect("pick_event", self._on_nirc2_map_pick)
+        self.n2_map_canvas.mpl_connect("button_press_event",
+                                       self._on_nirc2_map_ext_click)
         self._n2_sel_star = None
         map_v.addWidget(self.n2_map_canvas, 1)
         self.n2_field_stats = QtWidgets.QLabel("")
@@ -825,6 +836,9 @@ class Nirc2StrehlTabMixin:
                            if n.lower().endswith((".fits", ".fits.gz")))
         except OSError:
             return
+        if self._nirc2_kind() == "nirc2":
+            from ...frame_watch import is_unp_frame
+            names = [n for n in names if not is_unp_frame(n)]
         for name in names:
             item = QtWidgets.QListWidgetItem(name)
             item.setData(QtCore.Qt.ItemDataRole.UserRole, name)
@@ -1409,11 +1423,12 @@ class Nirc2StrehlTabMixin:
         self._n2_pick_locked = True    # zoom freezes on the measured star
 
     def _on_nirc2_map_ext_click(self, event):
-        """Pop-out-only mirror of _on_nirc2_click's add-star branch: while
-        'Add star by click' is armed AND the pop-out is showing the real
-        image backdrop (show_image=True -- _nirc2_draw_map_into never draws
-        one otherwise, so there's nothing meaningful to click), a click on
-        the pop-out map measures that pixel and adds it to the field,
+        """Field-map mirror of _on_nirc2_click's add-star branch, on the
+        embedded map and the pop-out alike: while 'Add star by click' is
+        armed AND that map is showing the real image backdrop (its own
+        show-image toggle -- _nirc2_draw_map_into never draws one
+        otherwise, so there's nothing meaningful to click), a click on
+        the map measures that pixel and adds it to the field,
         exactly like clicking the Image sub-tab -- no tab switch needed.
         The click arrives in arcsec (the map's plot frame); this inverts
         the SAME ps/half-extent transform _nirc2_draw_map_into uses to
@@ -1421,7 +1436,13 @@ class Nirc2StrehlTabMixin:
         expects."""
         if not self.n2_add_star.isChecked():
             return
-        if not getattr(self, "_n2_map_ext_show_image", False):
+        # the embedded map's own toggle governs clicks on it; the pop-out's
+        # toggle governs clicks on the pop-out
+        if event.canvas is self.n2_map_canvas:
+            showing = self.n2_map_show_image.isChecked()
+        else:
+            showing = getattr(self, "_n2_map_ext_show_image", False)
+        if not showing:
             return
         if (self._n2_image is None or self._n2_params is None
                 or event.xdata is None or event.ydata is None
@@ -2484,10 +2505,10 @@ class Nirc2StrehlTabMixin:
         ext_lab = getattr(self, "_n2_map_ext_stats", None)
         if ext_lab is not None:
             ext_lab.setText(stats_txt)
-        # background-image mode is pop-out only (Eduardo 2026-07-26: the
-        # embedded map is too small for it to help) -- never applied here
+        # background-image mode: the embedded map has its own toggle
+        # (Eduardo 2026-10-05, reversing the 2026-07-26 pop-out-only call)
         self._nirc2_draw_map_into(self.n2_map_fig, self.n2_map_canvas,
-                                  show_image=False)
+                                  show_image=self.n2_map_show_image.isChecked())
         ext = getattr(self, "_n2_map_ext", None)
         if ext is not None:
             fig, canvas = ext

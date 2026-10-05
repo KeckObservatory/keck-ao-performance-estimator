@@ -50,7 +50,7 @@ __all__ = ["FRAME_PATTERNS", "NIRC2_DATA_DISKS", "FITS_BLOCK",
            "frame_ready", "night_dir_name", "find_latest_night_dir",
            "split_remote", "parse_rsync_listing", "remote_newest_frame",
            "remote_cache_dir", "remote_fetch", "prune_cache",
-           "find_latest_osiris_night"]
+           "find_latest_osiris_night", "is_unp_frame"]
 
 FRAME_PATTERNS = {
     "nirc2": re.compile(r"^n(\d{4})\.fits$"),
@@ -70,6 +70,14 @@ _RSYNC_SSH = "ssh -o BatchMode=yes -o ConnectTimeout=10"
 _REMOTE_KEEP = 20       # cached frames kept per remote directory
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun",
            "jul", "aug", "sep", "oct", "nov", "dec")
+
+
+def is_unp_frame(name):
+    """True for an unprocessed NIRC2 file -- the raw ``n_unp_NNNN.fits``
+    written beside each ``nNNNN.fits`` and the KOA ``*_unp.fits`` export.
+    These are not science frames and are skipped when a NIRC2 directory
+    is listed."""
+    return re.search(r"_unp[_.]", name, re.IGNORECASE) is not None
 
 
 def is_frame_name(name, kind=None):

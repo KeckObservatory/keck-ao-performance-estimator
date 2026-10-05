@@ -10,7 +10,9 @@ embedded one -- too small for it to help) has a "Show image" toggle:
 off (default) reproduces the original plain-background, filled-marker
 map exactly; on draws the actual frame as a background with HOLLOW
 (open-face) markers so the star underneath a measurement is visible
-through the ring. Fully offline; run headless
+through the ring. (2026-10-05: the embedded map now has its own,
+default-off toggle too -- gui_phase48; the default-off look pinned here
+is unchanged.) Fully offline; run headless
 (QT_QPA_PLATFORM=offscreen).
 """
 import os
