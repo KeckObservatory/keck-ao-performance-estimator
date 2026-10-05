@@ -325,8 +325,7 @@ class Nirc2StrehlTabMixin:
             "cleaning would remove almost all its own aperture flux is "
             "left off the field map rather than reported (reinsertable, "
             "same as a field-consistency outlier).")
-        # IDL Strehl-tool version (2026-10-04 K2 update): shares the
-        # robust-sky row so the column does not grow (dock never scrolls)
+        # IDL Strehl-tool version (2026-10-04 K2 update)
         self.n2_idl_version = QtWidgets.QComboBox()
         self.n2_idl_version.addItems(list(engine.SR_TOOL_IDL_VERSIONS))
         self.n2_idl_version.setCurrentText(engine.SR_TOOL_IDL_DEFAULT)
@@ -342,12 +341,8 @@ class Nirc2StrehlTabMixin:
             "The 2026-10 FWHM is bounded by the peak box "
             "(2 x Peak radius + 1 px), so a seeing-limited PSF reads "
             "truncated; widen Peak radius for those.")
-        idl_row = QtWidgets.QHBoxLayout()
-        idl_row.addWidget(self.n2_robust_sky)
-        idl_row.addStretch(1)
-        idl_row.addWidget(QtWidgets.QLabel("IDL:"))
-        idl_row.addWidget(self.n2_idl_version)
-        form.addRow(self._wrap(idl_row))
+        form.addRow(self.n2_robust_sky)
+        form.addRow("IDL version:", self.n2_idl_version)
         form.addRow(self.n2_auto_rad)
         form.addRow(self.n2_ee_corr)
         form.addRow(self.n2_psf_clean)
