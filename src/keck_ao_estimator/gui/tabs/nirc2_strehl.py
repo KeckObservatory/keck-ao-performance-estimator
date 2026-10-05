@@ -325,7 +325,29 @@ class Nirc2StrehlTabMixin:
             "cleaning would remove almost all its own aperture flux is "
             "left off the field map rather than reported (reinsertable, "
             "same as a field-consistency outlier).")
-        form.addRow(self.n2_robust_sky)
+        # IDL Strehl-tool version (2026-10-04 K2 update): shares the
+        # robust-sky row so the column does not grow (dock never scrolls)
+        self.n2_idl_version = QtWidgets.QComboBox()
+        self.n2_idl_version.addItems(list(engine.SR_TOOL_IDL_VERSIONS))
+        self.n2_idl_version.setCurrentText(engine.SR_TOOL_IDL_DEFAULT)
+        self.n2_idl_version.setToolTip(
+            "Which summit IDL Strehl tool to reproduce.\n"
+            "2026-10 (default, K2 update of 2026-10-04): FWHM = diameter of "
+            "the circle whose area equals the area above half maximum in "
+            "the 8x sinc-upsampled peak box; the diffraction-limited "
+            "reference photometry is annulus-sky-subtracted like the star "
+            "(SR x0.994-0.996 vs legacy).\n"
+            "legacy: spline radial-profile FWHM (find_fwhm.pro) and a "
+            "sky=0 reference (bmacaper.pro).\n"
+            "The 2026-10 FWHM is bounded by the peak box "
+            "(2 x Peak radius + 1 px), so a seeing-limited PSF reads "
+            "truncated; widen Peak radius for those.")
+        idl_row = QtWidgets.QHBoxLayout()
+        idl_row.addWidget(self.n2_robust_sky)
+        idl_row.addStretch(1)
+        idl_row.addWidget(QtWidgets.QLabel("IDL:"))
+        idl_row.addWidget(self.n2_idl_version)
+        form.addRow(self._wrap(idl_row))
         form.addRow(self.n2_auto_rad)
         form.addRow(self.n2_ee_corr)
         form.addRow(self.n2_psf_clean)
@@ -1227,7 +1249,8 @@ class Nirc2StrehlTabMixin:
             robust_sky=self.n2_robust_sky.isChecked(),
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
-            psf_clean=False, parent=self)
+            psf_clean=False, idl_version=self._nirc2_idl_version(),
+            parent=self)
         self._n2_worker.frame_done.connect(self._on_nirc2_frame_done)
         self._n2_worker.frame_failed.connect(self._on_nirc2_frame_failed)
         self._n2_worker.finished_all.connect(self._on_nirc2_finished)
@@ -1483,6 +1506,7 @@ class Nirc2StrehlTabMixin:
             dl_psf=self._n2_dl, robust_sky=self.n2_robust_sky.isChecked(),
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
+            idl_version=self._nirc2_idl_version(),
             psf_clean=clean, epsf=self._n2_field_epsf if clean else None,
             star_catalog=self._n2_field_catalog if clean else None,
             psf_clean_engine=self._nirc2_psf_clean_engine() if clean else "native",
@@ -1497,6 +1521,12 @@ class Nirc2StrehlTabMixin:
                 "picks will reuse it")
         self._nirc2_display(result)
         return result
+
+    def _nirc2_idl_version(self):
+        """The IDL Strehl-tool version selected ("2026-10" or "legacy")."""
+        widget = getattr(self, "n2_idl_version", None)
+        return (widget.currentText() if widget is not None
+                else engine.SR_TOOL_IDL_DEFAULT)
 
     def _nirc2_psf_clean_engine(self):
         """The engine currently selected for PSF-fit cleaning ("field" or
@@ -1735,6 +1765,7 @@ class Nirc2StrehlTabMixin:
             robust_sky=self.n2_robust_sky.isChecked(),
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
+            idl_version=self._nirc2_idl_version(),
             psf_clean=self.n2_psf_clean.isChecked(),
             epsf=self._n2_field_epsf, star_catalog=self._n2_field_catalog,
             psf_clean_engine=self._nirc2_psf_clean_engine(),
@@ -1845,7 +1876,8 @@ class Nirc2StrehlTabMixin:
                     dl_psf=self._n2_dl,
                     robust_sky=self.n2_robust_sky.isChecked(),
                     sky_override=self._n2_sky_override,
-                    auto_radius=False)
+                    auto_radius=False,
+                    idl_version=self._nirc2_idl_version())
                 if full.ok and 0 < full.strehl < 1:
                     self._n2_ee_pairs[id(r)] = full
             self._nirc2_field_request_redraw()
@@ -3162,7 +3194,8 @@ class Nirc2StrehlTabMixin:
             f"Image {self._n2_imno}  SR {result.strehl:.3f} "
             f"±{result.sr_err:.3f}  "
             f"FWHM {result.fwhm_mas:7.2f} mas  WFE {result.wfe_nm:6.1f} nm  "
-            f"pos {result.x:6.1f} {result.y:6.1f}")
+            f"pos {result.x:6.1f} {result.y:6.1f}"
+            + ("  [IDL legacy]" if result.idl_version == "legacy" else ""))
         if cmp_res is not None:
             if cmp_res["s_conv"] is None:
                 self.n2_log.appendPlainText(f"predicted: {cmp_res['text']}")

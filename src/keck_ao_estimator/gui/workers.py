@@ -195,7 +195,7 @@ class Nirc2MeasureWorker(QThread):
     def __init__(self, path, prefix, im1, nim, bg1, nbg, radii,
                  autofind=True, files=None, robust_sky=False,
                  sky_override=None, auto_radius=False, psf_clean=False,
-                 parent=None):
+                 idl_version=None, parent=None):
         super().__init__(parent)
         self.path, self.prefix = path, prefix
         self.im1, self.nim, self.bg1, self.nbg = im1, nim, bg1, nbg
@@ -206,6 +206,7 @@ class Nirc2MeasureWorker(QThread):
         self.sky_override = sky_override
         self.auto_radius = auto_radius
         self.psf_clean = psf_clean
+        self.idl_version = idl_version   # None = the engine default
         self._pause_mutex = QtCore.QMutex()
         self._pause_cond = QtCore.QWaitCondition()
         self._paused = False
@@ -341,6 +342,8 @@ class Nirc2MeasureWorker(QThread):
                         sky_override=self.sky_override,
                         auto_radius=self.auto_radius,
                         psf_clean=self.psf_clean)
+                    if self.idl_version is not None:
+                        kwargs["idl_version"] = self.idl_version
                     result = measure_strehl(reduced, **kwargs)
                     if not result.ok:
                         # AUTOFIND's brightest pixel is not always a

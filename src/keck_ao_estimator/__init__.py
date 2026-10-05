@@ -84,6 +84,7 @@ from .geometry import (
 from .gs_ranking import rank_guide_stars
 from .image_strehl import (
     CROWDING_WARN_FRAC, EDGE_CLIP_WARN_FRAC, SR_ERR_MAX, Nirc2StrehlResult,
+    SR_TOOL_IDL_DEFAULT, SR_TOOL_IDL_VERSIONS, dl_reference_flux,
     aperture_edge_clip_frac, aperture_flux, cntrd,
     deadpix_fill, find_peak, load_nirc2_calibration,
     field_consistent, find_stars, fix_image, measure_field, measure_nirc2_frame,

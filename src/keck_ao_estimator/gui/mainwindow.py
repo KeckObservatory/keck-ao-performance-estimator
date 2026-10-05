@@ -1106,6 +1106,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                 "bg1": self.n2_bg1.value(), "nbg": self.n2_nbg.value(),
                 "autofind": self.n2_autofind.isChecked(),
                 "robust_sky": self.n2_robust_sky.isChecked(),
+                "idl_version": self.n2_idl_version.currentText(),
                 "auto_radius": self.n2_auto_rad.isChecked(),
                 "psf_clean": self.n2_psf_clean.isChecked(),
                 "psf_clean_engine": self.n2_psf_clean_engine.currentText(),
@@ -1281,6 +1282,8 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self.n2_nbg.setValue(int(n2.get("nbg", 0)))
             self.n2_autofind.setChecked(bool(n2.get("autofind", True)))
             self.n2_robust_sky.setChecked(bool(n2.get("robust_sky", False)))
+            self.n2_idl_version.setCurrentText(str(n2.get(
+                "idl_version", engine.SR_TOOL_IDL_DEFAULT)))
             self.n2_auto_rad.setChecked(bool(n2.get("auto_radius", False)))
             self.n2_psf_clean.setChecked(bool(n2.get("psf_clean", False)))
             self.n2_psf_clean_engine.setCurrentText(n2.get(

@@ -75,6 +75,28 @@ def synthetic_checks():
     check("radial_profile_fwhm gaussian", abs(fw - 2.355 * 2.2) < 0.15,
           f"{fw:.3f} px vs {2.355 * 2.2:.3f}")
 
+    # --- 2026-10 IDL FWHM: area above half max of the upsampled box.  For
+    # a circular Gaussian that area is a disc of diameter FWHM, so the
+    # pixel-deconvolved Gaussian must read its own optical FWHM.
+    pk2, fw2 = engine.find_peak(gpix, 31.5, 33.5, 23, return_fwhm=True)
+    check("find_peak return_fwhm keeps the peak", pk2 == pk,
+          f"{pk2} vs {pk}")
+    check("find_peak area FWHM gaussian", abs(fw2 - 2.3548 * sig) < 0.1,
+          f"{fw2:.3f} px vs {2.3548 * sig:.3f}")
+
+    # --- the peak commutes with a constant sky (2026-10 subtracts it
+    # before upsampling, legacy after): DC passes the sinc unchanged
+    pk_sky = engine.find_peak(gpix + 37.0, 31.5, 33.5, 23) - 37.0
+    check("find_peak sky before == after upsampling",
+          abs(pk_sky - pk) < 1e-6 * amp, f"{pk_sky:.6f} vs {pk:.6f}")
+
+    # --- DL reference flux: 2026-10 subtracts the Airy-wing annulus
+    dl = engine.nirc2_dl_psf("narrow", "largehex", 2.124, 0.0, npix=512)
+    f_new = engine.dl_reference_flux(dl, 100.6)
+    f_old = engine.dl_reference_flux(dl, 100.6, "legacy")
+    check("DL reference flux 2026-10 / legacy in (0.990, 0.999)",
+          0.990 < f_new / f_old < 0.999, f"{f_new / f_old:.4f}")
+
     # --- sigma filter: kills an isolated hot pixel, keeps a real PSF core
     field = rng.normal(100.0, 5.0, (64, 64))
     field[20, 20] = 5000.0
@@ -459,7 +481,9 @@ def golden_checks():
         if not os.path.exists(path):
             print(f"  [skip] {g['frame_file']} missing")
             continue
-        r = engine.measure_nirc2_frame(path, flat=flat, mask=mask)
+        # the goldens were run on the pre-2026-10 IDL tool
+        r = engine.measure_nirc2_frame(path, flat=flat, mask=mask,
+                                       idl_version="legacy")
         ds = r.strehl - float(g["strehl"])
         df = r.fwhm_mas - float(g["fwhm_mas"])
         dx = r.x - float(g["x_pix"])
@@ -507,7 +531,7 @@ def osiris_golden_checks():
         if not os.path.exists(path):
             print(f"  [skip] {g['frame_file']} missing")
             continue
-        r = engine.measure_osiris_frame(path)
+        r = engine.measure_osiris_frame(path, idl_version="legacy")
         ds = r.strehl - float(g["strehl"])
         df = r.fwhm_mas - float(g["fwhm_mas"])
         dx = r.x - float(g["x_pix"])

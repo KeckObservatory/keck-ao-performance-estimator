@@ -6,8 +6,21 @@ filter -> star at brightest pixel or supplied position -> DAOPHOT-style
 derivative centroid (cntrd.pro) -> aperture photometry with a mean-sky
 annulus (mvdaper.pro) -> pixelation-corrected peak via sinc-deconvolved
 8x Fourier upsampling (find_peak.pro) -> Strehl against the identical
-photometry on the diffraction-limited PSF -> spline radial-profile FWHM
-(find_fwhm.pro) and Marechal WFE.
+photometry on the diffraction-limited PSF -> FWHM and Marechal WFE.
+
+Two IDL versions are selectable (`idl_version`, SR_TOOL_IDL_VERSIONS):
+"2026-10" (DEFAULT; mvandam's 2026-10-04 K2 update) takes the FWHM from
+the same sinc-upsampled peak box as the peak -- the diameter of the circle
+whose area equals the area above half maximum (find_peak.pro /find_fwhm)
+-- and sky-subtracts the diffraction-limited reference photometry with the
+same annulus scheme as the star (find_strehl.pro, mvdaper at the DL
+centre, annulus photrad+20..+30 px; lowers SR by x0.994-0.996 vs legacy).
+"legacy" is the pre-2026-10 tool: spline radial-profile FWHM
+(find_fwhm.pro) and a sky=0, centroided reference (bmacaper.pro).  The
+2026-10 version also subtracts the sky BEFORE upsampling the peak; that is
+exactly a no-op for the peak (the upsampling is linear and passes DC
+unchanged) and matters only to the half-max threshold, which is why the
+FWHM is computed on the sky-subtracted box.
 
 Index convention: numpy arrays are [row, col] = [y, x]; all (x, y)
 arguments and results use IDL/detector convention (x = column).
@@ -31,6 +44,10 @@ from .nirc2 import (
     Nirc2FrameParams, nirc2_frame_params,
 )
 from .nirc2_psf import nirc2_dl_psf
+
+# IDL Strehl-tool versions the measurement can reproduce (module docstring)
+SR_TOOL_IDL_VERSIONS = ("2026-10", "legacy")
+SR_TOOL_IDL_DEFAULT = "2026-10"
 # NOTE: psf_fit imports aperture_flux from here, so importing it at module
 # level is circular. The D27 bias constants are fetched lazily below, in
 # the one place they are used.
@@ -271,10 +288,16 @@ def cntrd(img, x, y, fwhm, silent=True):
 
 # ----------------------------------------------------------- peak and flux
 
-def find_peak(image, x, y, boxsize, oversamp=8):
+def find_peak(image, x, y, boxsize, oversamp=8, return_fwhm=False):
     """Pixelation-corrected peak via sinc-deconvolved Fourier upsampling
     (find_peak.pro): FFT a box around the star, deconvolve the pixel
-    transfer function, zero-pad by `oversamp`, inverse FFT, take the max."""
+    transfer function, zero-pad by `oversamp`, inverse FFT, take the max.
+
+    `return_fwhm=True` returns (peak, fwhm_px) instead, the 2026-10 IDL
+    FWHM (find_peak.pro /find_fwhm): the diameter of the circle with the
+    same area as the upsampled pixels at or above half the maximum, in
+    image pixels.  It is bounded by the box (2*peak_radius+1 px), so a
+    PSF wider than that is truncated, and pass a sky-subtracted image."""
     image = np.asarray(image, dtype=float)
     boxsize = 2 * int(np.ceil(boxsize / 2.0))
     boxhalf = boxsize // 2
@@ -301,7 +324,37 @@ def find_peak(image, x, y, boxsize, oversamp=8):
     zp[:boxsize, :boxsize] = sh
     zp = np.roll(zp, (-boxhalf, -boxhalf), axis=(0, 1))
     upsampled = np.real(np.fft.ifft2(zp)) * ext * ext
-    return float(upsampled.max())
+    peak = float(upsampled.max())
+    if not return_fwhm:
+        return peak
+    n_half = int(np.count_nonzero(upsampled >= peak / 2.0))
+    return peak, float(np.sqrt(4.0 / np.pi * n_half) / oversamp)
+
+
+def dl_reference_flux(dl_psf, photrad, idl_version=SR_TOOL_IDL_DEFAULT):
+    """Aperture flux of the diffraction-limited PSF that normalizes the
+    Strehl (strehlone = dlpeak / this), per IDL version.
+
+    "2026-10": mvdaper at the array centre with the annulus sky
+    photrad+20..+30 px subtracted (find_strehl.pro, 2026-10-04).
+    "legacy": bmacaper -- centroid first, sky forced to 0."""
+    ctr = dl_psf.shape[0] // 2
+    if idl_version == "legacy":
+        crad = max(photrad / 2.0, 6.0)
+        cx, cy = cntrd(dl_psf, ctr, ctr, crad / 2.0)
+        if cx < 0:
+            cx, cy = float(ctr), float(ctr)
+        return aperture_flux(dl_psf, photrad, cx, cy, skyval=0.0)[0]
+    _check_idl_version(idl_version)
+    return aperture_flux(dl_psf, photrad, float(ctr), float(ctr),
+                         insky_px=photrad + 20.0,
+                         outsky_px=photrad + 30.0)[0]
+
+
+def _check_idl_version(idl_version):
+    if idl_version not in SR_TOOL_IDL_VERSIONS:
+        raise ValueError(f"idl_version must be one of {SR_TOOL_IDL_VERSIONS}, "
+                         f"got {idl_version!r}")
 
 
 def sigma_clipped_median(values, n_sigma=3.0, iters=5):
@@ -551,6 +604,7 @@ class Nirc2StrehlResult:
     sky_mode: str = "annulus-mean"
     sr_err: float = 0.0         # sky-noise SR uncertainty (lower bound)
     photrad_used_arcsec: float = 0.0    # aperture actually used
+    idl_version: str = SR_TOOL_IDL_DEFAULT  # FWHM/reference convention
     edge_clip: float = 0.0      # fraction of the outer-annulus disc off-array
 
     # --- PSF-fit neighbour subtraction (opt-in; see psf_fit.py) --------
@@ -648,8 +702,13 @@ def measure_strehl(image, params=None, header=None, pos=None,
                    dl_psf=None, robust_sky=False, sky_override=None,
                    auto_radius=False, psf_clean=False, epsf=None,
                    star_catalog=None, psf_clean_engine="native",
-                   field_solution=None):
+                   field_solution=None, idl_version=SR_TOOL_IDL_DEFAULT):
     """Measure the Strehl of a reduced NIRC2 image (calc_and_display.pro).
+
+    `idl_version` picks which IDL tool to reproduce: "2026-10" (default,
+    area-above-half-max FWHM, sky-subtracted DL reference) or "legacy"
+    (radial-profile spline FWHM, sky=0 reference); see the module
+    docstring.
 
     `image` should come from reduce_frame (or be otherwise reduced).  Give
     `pos=(x, y)` to measure a chosen star instead of the brightest pixel.
@@ -670,6 +729,7 @@ def measure_strehl(image, params=None, header=None, pos=None,
     frame, `field_solve`); `field_solution` shares a prebuilt one, as
     `measure_field` does.
     """
+    _check_idl_version(idl_version)
     if params is None:
         if header is None:
             raise ValueError("need params or header")
@@ -718,13 +778,7 @@ def measure_strehl(image, params=None, header=None, pos=None,
     # photrad as the star, so an optimized radius stays self-consistent
     ctr = dl_psf.shape[0] // 2
     dlpeak = find_peak(dl_psf, ctr, ctr, box)
-    # reference photometry mirrors bmacaper.pro: centroid first, sky = 0
-    crad = max(photrad / 2.0, 6.0)
-    cx, cy = cntrd(dl_psf, ctr, ctr, crad / 2.0)
-    if cx < 0:
-        cx, cy = float(ctr), float(ctr)
-    refflux = aperture_flux(dl_psf, photrad, cx, cy, skyval=0.0)[0]
-    strehlone = dlpeak / refflux
+    strehlone = dlpeak / dl_reference_flux(dl_psf, photrad, idl_version)
 
     work = sigma_filter3(np.asarray(image, dtype=float))
 
@@ -780,12 +834,8 @@ def measure_strehl(image, params=None, header=None, pos=None,
                         bg_outer_arcsec=bg_outer_arcsec)
                 photrad = photometry_radius_arcsec * 1000.0 / ps
                 # strehlone is aperture-matched, so it must follow
-                crad = max(photrad / 2.0, 6.0)
-                _cx, _cy = cntrd(dl_psf, ctr, ctr, crad / 2.0)
-                if _cx < 0:
-                    _cx, _cy = float(ctr), float(ctr)
-                strehlone = dlpeak / aperture_flux(
-                    dl_psf, photrad, _cx, _cy, skyval=0.0)[0]
+                strehlone = dlpeak / dl_reference_flux(
+                    dl_psf, photrad, idl_version)
 
     # D44: robust sky and PSF-fit cleaning DOUBLE-CORRECT.  Both exist to
     # remove the same neighbour light -- cleaning takes the neighbours out
@@ -839,7 +889,11 @@ def measure_strehl(image, params=None, header=None, pos=None,
                   xi - 2 * radius + 1:xi + 2 * radius + 1]
     saturated = subpop.max() / params.coadds > params.max_counts
 
-    fwhm_mas = radial_profile_fwhm(_meas - sky, x, y) * ps
+    if idl_version == "legacy":
+        fwhm_mas = radial_profile_fwhm(_meas - sky, x, y) * ps
+    else:
+        fwhm_mas = find_peak(_meas - sky, x, y, box,
+                             return_fwhm=True)[1] * ps
     wfe_nm = (float(np.sqrt(-np.log(strehl)) * params.effwave_um * 1e3 / (2 * np.pi))
               if 0.0 < strehl < 1.0 else 0.0)
 
@@ -886,7 +940,7 @@ def measure_strehl(image, params=None, header=None, pos=None,
                 bg_outer_arcsec=bg_outer_arcsec,
                 peak_radius_arcsec=peak_radius_arcsec, dl_psf=dl_psf,
                 robust_sky=robust_sky, sky_override=sky_override,
-                auto_radius=auto_radius)
+                auto_radius=auto_radius, idl_version=idl_version)
             return replace(
                 _kept, epsf_tag=str(_rep.epsf_tag),
                 psf_clean_note=(f"cleaning REFUSED: unphysical result -- "
@@ -899,6 +953,7 @@ def measure_strehl(image, params=None, header=None, pos=None,
         saturated=bool(saturated), params=params,
         crowding=float(crowding), sky_mode=sky_mode, sr_err=float(sr_err),
         photrad_used_arcsec=float(photometry_radius_arcsec),
+        idl_version=idl_version,
         edge_clip=float(aperture_edge_clip_frac(work.shape, x, y,
                                                 _bgout_px)),
         cleaned=bool(_rep.cleaned) if _rep is not None else False,
