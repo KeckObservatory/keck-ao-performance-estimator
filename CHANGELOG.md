@@ -1,7 +1,35 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.3.2` in the install URL).
+is released on GitHub only (pin `@v1.4.0` in the install URL).
+
+## 1.4.0 — 2026-10-05
+
+### Changed
+- **Measured SR follows the 2026-10-04 K2 IDL Strehl tool by default.**
+  The new IDL version changes two things, and both are the new default:
+  - **FWHM** is the diameter of the circle whose area equals the area at
+    or above half maximum in the 8x sinc-upsampled peak box
+    (`find_peak /find_fwhm`). It replaces the radial-profile spline
+    (`find_fwhm.pro`). On the reference frames it reads 0.4–1.9 mas
+    narrower. It cannot exceed the peak box (2 x Peak radius + 1 px), so
+    widen Peak radius for seeing-limited frames.
+  - **The diffraction-limited reference photometry** has the annulus sky
+    (photrad+20 to +30 px) subtracted, as for the star. This makes every
+    SR x0.994–0.996 lower (x0.9937 on the reference frames).
+  - **IDL version** selector in Photometry: 2026-10 (default) or legacy,
+    the previous behaviour, which reproduces the earlier IDL goldens
+    exactly. It is saved in the config, and legacy measurements are
+    tagged `[IDL legacy]` in the log. Library:
+    `measure_strehl(idl_version=...)`.
+  - The predicted-FWHM convention `fwhm_srtool` is unchanged; the
+    regression references are unchanged.
+- **NIRC2 frame list skips unprocessed `_unp` files** (raw
+  `n_unp_NNNN.fits` and KOA `*_unp.fits`).
+- **The measured field map can show the frame underneath** with a new
+  **Image** toggle on the embedded map, not only in the pop-out. While it
+  is on, **Add star by click** works on the map. The pop-out keeps its own
+  toggle. Regression test `gui_phase48`.
 
 ## 1.3.2 — 2026-09-30
 
