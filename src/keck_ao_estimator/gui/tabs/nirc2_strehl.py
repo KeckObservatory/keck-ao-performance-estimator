@@ -460,11 +460,31 @@ class Nirc2StrehlTabMixin:
             "night log. Files without a DATAFILE card keep showing "
             "their on-disk name.")
         self.n2_native_names.toggled.connect(self._nirc2_refresh_files)
-        left.addWidget(self.n2_native_names)
+        self.n2_series_btn = QtWidgets.QPushButton("Series stats")
+        self.n2_series_btn.setToolTip(
+            "Measure a series of frames and log the MEAN and STANDARD "
+            "DEVIATION (sample, n-1) of SR, FWHM and WFE, with min/max. "
+            "Uses the frames SELECTED in the list below (click, "
+            "shift-click, ctrl-click); with none selected, the numbered "
+            "FIRST IMAGE / N IMAGES sequence. Every setting in force for "
+            "GO! applies (radii, sky, background frames, IDL version), and "
+            "each frame is logged as usual. Failed, unphysical and "
+            "saturated frames are left out of the statistics and listed. "
+            "Needs AUTOFIND on (each frame's brightest star).")
+        self.n2_series_btn.clicked.connect(self._on_nirc2_series_stats)
+        names_row = QtWidgets.QHBoxLayout()
+        names_row.setContentsMargins(0, 0, 0, 0)
+        names_row.addWidget(self.n2_native_names)
+        names_row.addStretch(1)
+        names_row.addWidget(self.n2_series_btn)
+        left.addLayout(names_row)
         self.n2_files = QtWidgets.QListWidget()
+        self.n2_files.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.n2_files.setToolTip(
             "n####.fits frames found in PATH — double-click one to set "
-            "FIRST IMAGE to it and measure it immediately")
+            "FIRST IMAGE to it and measure it immediately; select several "
+            "(shift/ctrl-click) for Series stats")
         self.n2_files.itemDoubleClicked.connect(self._on_nirc2_file_dclick)
         self.n2_path.textChanged.connect(self._nirc2_refresh_files)
         left.addWidget(self.n2_files, 1)
@@ -1268,9 +1288,48 @@ class Nirc2StrehlTabMixin:
         self._n2_worker.finished.connect(self._nirc2_watch_drain)
         self._n2_worker.start()
 
+    def _on_nirc2_series_stats(self):
+        """Series stats: run the GO loop over the selected frames (or the
+        numbered sequence) and summarize when it finishes -- see
+        series_stats.py. Results are collected by label in
+        _on_nirc2_frame_done/_failed; a later success for the same label
+        (the autofind retry) replaces an earlier failure."""
+        import os
+        if not self.n2_autofind.isChecked():
+            self.n2_log.appendPlainText(
+                "! Series stats needs AUTOFIND on (each frame's brightest "
+                "star)")
+            return
+        items = sorted(self.n2_files.selectedItems(),
+                       key=self.n2_files.row)
+        files = None
+        if items:
+            path = self._nirc2_frames_dir()
+            files = [(os.path.splitext(it.text())[0], os.path.join(
+                path, it.data(QtCore.Qt.ItemDataRole.UserRole) or it.text()))
+                for it in items]
+        self._n2_series = {}
+        self.n2_log.appendPlainText(
+            f"Series stats: measuring {len(files)} selected frame(s)"
+            if files else
+            f"Series stats: measuring images {self.n2_im1.value()} .. "
+            f"{self.n2_im1.value() + self.n2_nim.value() - 1}")
+        self._nirc2_start(files=files)
+        if self.n2_go.isEnabled():      # refused to start (guard message)
+            self._n2_series = None
+
+    def _nirc2_series_record(self, label, result):
+        series = getattr(self, "_n2_series", None)
+        if series is None:
+            return
+        if isinstance(result, str) and label in series:
+            return          # never let a failure overwrite a measurement
+        series[label] = result
+
     def _on_nirc2_frame_done(self, imno, result, params, reduced, dl,
                              header=None):
         import datetime as dt
+        self._nirc2_series_record(str(imno), result)
         self._n2_header = header       # AO keywords for the TT-star odometer
         if reduced is not self._n2_image:
             self._n2_field = []        # the map belongs to ONE frame
@@ -1334,9 +1393,16 @@ class Nirc2StrehlTabMixin:
 
     def _on_nirc2_frame_failed(self, imno, message):
         self.n2_log.appendPlainText(f"Image {imno}: {message}")
+        self._nirc2_series_record(str(imno), str(message))
 
     def _on_nirc2_finished(self):
         self.n2_go.setEnabled(True)
+        series = getattr(self, "_n2_series", None)
+        if series is not None:
+            self._n2_series = None
+            for line in engine.format_series_stats(
+                    engine.summarize_series(series.items())):
+                self.n2_log.appendPlainText(line)
         # anything still queued behind a dialog when the run ended
         self._nirc2_drain_pending_duplicates()
 

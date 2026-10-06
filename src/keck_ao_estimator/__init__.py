@@ -82,6 +82,10 @@ from .geometry import (
     sun_altitude_deg,
 )
 from .gs_ranking import rank_guide_stars
+from .series_stats import (
+    SERIES_METRICS, MetricStats, SeriesStats, exclusion_reason,
+    format_series_stats, summarize_series,
+)
 from .image_strehl import (
     CROWDING_WARN_FRAC, EDGE_CLIP_WARN_FRAC, SR_ERR_MAX, Nirc2StrehlResult,
     SR_TOOL_IDL_DEFAULT, SR_TOOL_IDL_VERSIONS, dl_reference_flux,
