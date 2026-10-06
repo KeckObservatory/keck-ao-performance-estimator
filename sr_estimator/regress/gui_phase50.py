@@ -20,7 +20,6 @@ warnings.filterwarnings("ignore")
 import numpy as np
 from qtcompat import QtWidgets
 
-import keck_ao_estimator as engine
 import keck_ao_estimator.gui as gui
 from keck_ao_estimator.image_strehl import _failed
 from keck_ao_estimator.nirc2 import nirc2_frame_params
