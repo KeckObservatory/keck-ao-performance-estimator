@@ -1338,8 +1338,10 @@ class Nirc2StrehlTabMixin:
     @staticmethod
     def _nirc2_frame_key(imno):
         """The log/series key of a frame: numbered GO! labels frames by
-        number (7), a file run by name (n0007) -- both mean n0007."""
-        return f"n{imno:04d}" if isinstance(imno, int) else str(imno)
+        number -- as the STRING "7" (the worker's str(no)) -- a file run by
+        name (n0007); both mean n0007."""
+        s = str(imno)
+        return f"n{int(s):04d}" if s.isdigit() else s
 
     def _nirc2_series_finish(self):
         """Summarize the collected series: one line in the log and a small

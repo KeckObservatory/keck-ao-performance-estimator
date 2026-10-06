@@ -155,6 +155,8 @@ def main():
     print(f"  [ok] end to end: {line}")
 
     # same frames again: all taken from the log, nothing re-measured
+    orig_start = win._nirc2_start
+
     def no_run(files=None):
         raise AssertionError(f"re-measured {files}")
     win._nirc2_start = no_run
@@ -167,6 +169,25 @@ def main():
     assert line2.startswith("Series n0001..n0003: n=3 (3 from log)"), line2
     assert line2.split("SR ")[1].split()[0] == f"{mean_txt}±{std_txt}", line2
     print("  [ok] logged frames are reused, not re-measured")
+
+    # a frame measured by a NUMBERED GO! (the worker labels it "1", a
+    # string) is reused too
+    win._nirc2_start = orig_start
+    win.n2_log.clear()
+    win.n2_files.clearSelection()
+    win._n2_logged_results = {}
+    win.n2_im1.setValue(1)
+    win.n2_nim.setValue(1)
+    win._n2_loaded_files = None
+    win._on_nirc2_go()
+    pump(lambda: win.n2_go.isEnabled())
+    assert "Image 1  SR" in win.n2_log.toPlainText(), win.n2_log.toPlainText()
+    win._nirc2_start = no_run
+    win.n2_files.item(0).setSelected(True)
+    win._on_nirc2_series_stats()
+    last = win.n2_log.toPlainText().strip().splitlines()[-1]
+    assert last.startswith("Series n0001: n=1 (1 from log)"), last
+    print("  [ok] numbered GO! frames are reused")
 
     # refused start (no AUTOFIND) leaves no series pending
     win.n2_autofind.setChecked(False)
