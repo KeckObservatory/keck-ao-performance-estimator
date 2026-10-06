@@ -1,7 +1,49 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.4.0` in the install URL).
+is released on GitHub only (pin `@v1.4.1` in the install URL).
+
+## 1.4.1 — 2026-10-06
+
+### Added
+- **Series stats** (Measured SR). Select several frames in the list
+  (shift/ctrl-click) and press **Series stats**. With none selected it
+  uses the FIRST IMAGE / N IMAGES run.
+  - The output is one log line plus a small pop-up table: mean, sample
+    stdev (n−1), min and max of SR, FWHM and WFE. Example:
+    `Series n0001..n0003: n=3  SR 0.447±0.072  FWHM 49.38±0.70 mas  WFE
+    325.1±32.6 nm`.
+  - Frames already measured and in the log are reused, not re-measured.
+  - Failed, unphysical and saturated frames are left out and listed with
+    the reason.
+  - Library: `summarize_series`, `format_series_line`.
+  - Regression tests `gui_phase49`, `gui_phase50`.
+- **Numbered OSIRIS runs.** A PREFIX field on the First image row names
+  numbered frames `<PREFIX><number>`: NIRC2 `n` + 4 digits, OSIRIS e.g.
+  `i260723_a` + 6 digits. It is remembered per instrument and saved in
+  the config, and for OSIRIS it fills in from the frames in PATH.
+  Double-clicking a numbered OSIRIS frame drives FIRST IMAGE. Regression
+  test `gui_phase51`.
+
+### Fixed
+- **A frame whose measurement fails is still shown**, titled with the
+  failure and the reason under the thumbnails, and a click on it measures
+  there even with AUTOFIND on. Before, a failure (e.g. "centroid failed")
+  left the panel blank. This also covers an error raised after the frame
+  was read.
+- **A missing calibration no longer aborts a run.** Frames are shown,
+  unmeasured, with the reason.
+- **Closing the window during a measurement** now stops and waits for the
+  worker threads. A running thread destroyed with its window could abort
+  the process.
+
+### Changed
+- **Kept in sync with PyAO's standalone Strehl tool**
+  (`kaotools.strehl_tool`, which carries this measurement engine
+  verbatim). The engine gained the docstrings PyAO requires and loads its
+  calibration from `data/` next to the module.
+  `sr_estimator/sync_pyao_strehl_tool.py --check|--copy <PyAO>` keeps the
+  vendored copy identical. Measured values are unchanged.
 
 ## 1.4.0 — 2026-10-05
 
