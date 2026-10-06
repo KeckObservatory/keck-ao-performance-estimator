@@ -1330,6 +1330,7 @@ class Nirc2StrehlTabMixin:
                              header=None):
         import datetime as dt
         self._nirc2_series_record(str(imno), result)
+        self._n2_frame_failed = False
         self._n2_header = header       # AO keywords for the TT-star odometer
         if reduced is not self._n2_image:
             self._n2_field = []        # the map belongs to ONE frame
@@ -1360,21 +1361,29 @@ class Nirc2StrehlTabMixin:
             # (_nirc2_start_worker passes psf_clean=False)
             self._nirc2_display(result)
 
-    def _nirc2_show_frame_only(self, params):
+    def _nirc2_show_frame_only(self, params, failure=None):
         """AUTOFIND-off GO!: show the reduced frame (no measurement, no
         circles) and prompt for the star click; the identity readouts fill
-        from the header so the target can be looked up meanwhile."""
+        from the header so the target can be looked up meanwhile.
+
+        `failure` (Eduardo 2026-10-06): a measurement that FAILED still
+        shows its frame, titled with the reason, so the image can be
+        inspected and a star clicked by hand."""
         self._n2_pick_locked = False
+        prompt = ("CLICK ON THE STAR" if failure is None
+                  else "measurement failed — click a star to measure")
         self._n2_last_draw = (
             f"Image {self._n2_imno} — {self._nirc2_mode_text(params)}"
-            " — CLICK ON THE STAR", None)
+            f" — {prompt}", None)
         self._nirc2_draw_main()
         for box in (self.n2_strehl_out, self.n2_fwhm_out, self.n2_wfe_out,
                     self.n2_pred_sr, self.n2_pred_fwhm, self.n2_dsr,
                     self.n2_dfwhm):
             box.setText("")
         self._nirc2_show_identity(params)
-        self.n2_warn.setText("")
+        self.n2_warn.setText("" if failure is None
+                             else f"MEASUREMENT FAILED: {failure}")
+        self._n2_frame_failed = failure is not None
 
     @staticmethod
     def _nirc2_mode_text(params):
@@ -1410,7 +1419,7 @@ class Nirc2StrehlTabMixin:
         """AUTOFIND OFF: live magnifier while picking the star — the
         MEASURED STAR panel follows the cursor with a crosshair, because
         the pointer itself hides faint cores (Eduardo 2026-07-23)."""
-        if (self.n2_autofind.isChecked() or self._n2_image is None
+        if (not self._nirc2_click_measures() or self._n2_image is None
                 or self._n2_pick_locked
                 or event.xdata is None or event.ydata is None
                 or event.inaxes is None):
@@ -1483,10 +1492,19 @@ class Nirc2StrehlTabMixin:
                 self.n2_log.appendPlainText(f"field: not added — {verdict}")
             self._n2_pick_locked = True
             return
-        if self.n2_autofind.isChecked():
+        if not self._nirc2_click_measures():
             return
         result = self._nirc2_measure_at(event.xdata, event.ydata)
         self._n2_pick_locked = True    # zoom freezes on the measured star
+        if result is not None and result.ok:
+            self._n2_frame_failed = False
+
+    def _nirc2_click_measures(self):
+        """A click on the image measures there with AUTOFIND off, and also
+        on a frame whose automatic measurement FAILED (it is shown with the
+        reason so a star can be picked by hand, Eduardo 2026-10-06)."""
+        return (not self.n2_autofind.isChecked()
+                or getattr(self, "_n2_frame_failed", False))
 
     def _on_nirc2_map_ext_click(self, event):
         """Field-map mirror of _on_nirc2_click's add-star branch, on the
@@ -3209,6 +3227,10 @@ class Nirc2StrehlTabMixin:
         if not result.ok:
             self.n2_log.appendPlainText(
                 f"Image {self._n2_imno}: {result.error}")
+            # still show the frame (Eduardo 2026-10-06)
+            if img is not None and result.params is not None:
+                self._nirc2_show_frame_only(result.params,
+                                            failure=result.error)
             return
 
         ps = result.params.plate_scale_mas
