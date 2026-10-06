@@ -1300,23 +1300,110 @@ class Nirc2StrehlTabMixin:
                 "! Series stats needs AUTOFIND on (each frame's brightest "
                 "star)")
             return
+        path = self._nirc2_frames_dir()
         items = sorted(self.n2_files.selectedItems(),
                        key=self.n2_files.row)
-        files = None
         if items:
-            path = self._nirc2_frames_dir()
-            files = [(os.path.splitext(it.text())[0], os.path.join(
+            req = [(os.path.splitext(it.text())[0], os.path.join(
                 path, it.data(QtCore.Qt.ItemDataRole.UserRole) or it.text()))
                 for it in items]
+        else:
+            first = self.n2_im1.value()
+            req = [(f"n{no:04d}", os.path.join(path, f"n{no:04d}.fits"))
+                   for no in range(first, first + self.n2_nim.value())]
+        # frames already measured AND logged are taken from the log
+        # (Eduardo 2026-10-06), only the rest is measured
+        logged = getattr(self, "_n2_logged_results", {})
         self._n2_series = {}
-        self.n2_log.appendPlainText(
-            f"Series stats: measuring {len(files)} selected frame(s)"
-            if files else
-            f"Series stats: measuring images {self.n2_im1.value()} .. "
-            f"{self.n2_im1.value() + self.n2_nim.value() - 1}")
-        self._nirc2_start(files=files)
+        self._n2_series_order = [lab for lab, _fp in req]
+        self._n2_series_from_log = 0
+        todo = []
+        for lab, fp in req:
+            r = logged.get((path, lab))
+            if r is None:
+                todo.append((lab, fp))
+            else:
+                self._n2_series[lab] = r
+                self._n2_series_from_log += 1
+        if not todo:
+            self._nirc2_series_finish()
+            return
+        self._nirc2_start(files=todo)
         if self.n2_go.isEnabled():      # refused to start (guard message)
             self._n2_series = None
+            return
+        # GO! afterwards re-measures the frame on screen, not the series
+        self._n2_loaded_files = todo[-1:]
+
+    @staticmethod
+    def _nirc2_frame_key(imno):
+        """The log/series key of a frame: numbered GO! labels frames by
+        number (7), a file run by name (n0007) -- both mean n0007."""
+        return f"n{imno:04d}" if isinstance(imno, int) else str(imno)
+
+    def _nirc2_series_finish(self):
+        """Summarize the collected series: one line in the log and a small
+        pop-up with the values (Eduardo 2026-10-06)."""
+        series, self._n2_series = self._n2_series, None
+        st = engine.summarize_series(
+            [(lab, series.get(lab)) for lab in self._n2_series_order])
+        self.n2_log.appendPlainText(engine.format_series_line(
+            st, from_log=self._n2_series_from_log))
+        self._nirc2_series_popup(st, self._n2_series_from_log)
+
+    def _nirc2_series_popup(self, st, from_log=0):
+        """Small non-modal window: mean / stdev / min / max per metric,
+        the frames used and any excluded with the reason."""
+        import math
+        old = getattr(self, "_n2_series_dialog", None)
+        if old is not None:
+            old.close()
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Series stats")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        span = (st.labels[0] if st.n == 1 else
+                f"{st.labels[0]} .. {st.labels[-1]}") if st.labels else "—"
+        head = QtWidgets.QLabel(
+            f"<b>{st.n} frame(s)</b>  {span}"
+            + (f"  ·  {from_log} from log" if from_log else "")
+            + (f"  ·  {len(st.excluded)} excluded" if st.excluded else ""))
+        lay.addWidget(head)
+        table = QtWidgets.QTableWidget(len(engine.SERIES_METRICS), 4)
+        table.setHorizontalHeaderLabels(["mean", "stdev", "min", "max"])
+        table.setVerticalHeaderLabels(
+            [name for _k, name, _f in engine.SERIES_METRICS])
+        table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        for i, (key, _name, fmt) in enumerate(engine.SERIES_METRICS):
+            m = st.metrics.get(key)
+            vals = ([m.mean, m.std, m.min, m.max] if m is not None
+                    else [float("nan")] * 4)
+            for j, v in enumerate(vals):
+                item = QtWidgets.QTableWidgetItem(
+                    "—" if math.isnan(v) else fmt.format(v))
+                item.setTextAlignment(
+                    QtCore.Qt.AlignmentFlag.AlignRight
+                    | QtCore.Qt.AlignmentFlag.AlignVCenter)
+                table.setItem(i, j, item)
+        table.resizeColumnsToContents()
+        table.setFixedHeight(table.verticalHeader().length()
+                             + table.horizontalHeader().height() + 4)
+        lay.addWidget(table)
+        if st.excluded:
+            def short(why):     # the full reason is in the log
+                why = why.split(". ")[0]
+                return why if len(why) <= 60 else why[:57] + "…"
+            ex = QtWidgets.QLabel("Excluded: " + "; ".join(
+                f"{lab} ({short(why)})" for lab, why in st.excluded))
+            ex.setWordWrap(True)
+            lay.addWidget(ex)
+        note = QtWidgets.QLabel("stdev = sample (n−1) scatter of the frames")
+        note.setStyleSheet("color: #777; font-size: 10px;")
+        lay.addWidget(note)
+        dlg.resize(420, dlg.sizeHint().height())
+        dlg.show()
+        self._n2_series_dialog = dlg
+        self._n2_series_table = table
 
     def _nirc2_series_record(self, label, result):
         series = getattr(self, "_n2_series", None)
@@ -1406,12 +1493,8 @@ class Nirc2StrehlTabMixin:
 
     def _on_nirc2_finished(self):
         self.n2_go.setEnabled(True)
-        series = getattr(self, "_n2_series", None)
-        if series is not None:
-            self._n2_series = None
-            for line in engine.format_series_stats(
-                    engine.summarize_series(series.items())):
-                self.n2_log.appendPlainText(line)
+        if getattr(self, "_n2_series", None) is not None:
+            self._nirc2_series_finish()
         # anything still queued behind a dialog when the run ended
         self._nirc2_drain_pending_duplicates()
 
@@ -3313,6 +3396,12 @@ class Nirc2StrehlTabMixin:
                     f"FWHM {fp_txt} mas  ΔSR {cmp_res['delta']:+.3f}  "
                     f"ΔFWHM {df_txt}")
         self._nirc2_add_csv_row(result, cmp_res)
+        if self.n2_append_log.isChecked():
+            # Series stats reuses what is already in the log
+            if not hasattr(self, "_n2_logged_results"):
+                self._n2_logged_results = {}
+            self._n2_logged_results[(self._nirc2_frames_dir(),
+                                     self._nirc2_frame_key(self._n2_imno))] = result
         self._nirc2_warn_guide_mag_mismatch(result.params)
 
         # identity readouts + target auto-load: a loaded target list wins

@@ -290,6 +290,7 @@ class Nirc2MeasureWorker(QThread):
             # the dialog
             if not self._wait_if_paused():
                 break
+            reduced = params = header = key = None
             try:
                 with fits.open(fpath) as hdul:
                     header = hdul[0].header
@@ -372,7 +373,15 @@ class Nirc2MeasureWorker(QThread):
                 self.frame_done.emit(no, result, params, reduced,
                                      dl_cache[key], header)
             except Exception as e:
-                self.frame_failed.emit(no, f"{type(e).__name__}: {e}")
+                msg = f"{type(e).__name__}: {e}"
+                if reduced is not None and params is not None:
+                    # the frame was read: show it with the failure
+                    # (Eduardo 2026-10-06) instead of nothing
+                    from ..image_strehl import _failed
+                    self.frame_done.emit(no, _failed(params, msg), params,
+                                         reduced, dl_cache.get(key), header)
+                else:
+                    self.frame_failed.emit(no, msg)
         self.finished_all.emit()
 
 

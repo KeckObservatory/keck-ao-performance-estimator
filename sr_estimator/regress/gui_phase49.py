@@ -5,8 +5,10 @@ frames and log the mean and sample standard deviation of SR, FWHM and WFE.
 (failed message, None, unphysical, saturated), a single frame's stdev is
 nan and prints as a dash. (2) The frame list is multi-select. (3) End to
 end, offline: three synthetic frames plus one broken file, all selected;
-the run logs the summary with n=3 and the broken file excluded, and the
-mean/stdev equal the per-frame log values. Run headless
+the run logs ONE summary line (n=3, the broken file excluded) whose
+mean/stdev equal the per-frame log values, and opens a small pop-up table
+with the same numbers; asking again for already-logged frames reuses the
+log and measures nothing (Eduardo 2026-10-06). Run headless
 (QT_QPA_PLATFORM=offscreen).
 """
 import os
@@ -133,21 +135,38 @@ def main():
     win._on_nirc2_series_stats()
     pump(lambda: win.n2_go.isEnabled() and win._n2_series is None)
     log = win.n2_log.toPlainText()
-    assert "Series stats: 3 frame(s), 1 excluded" in log, log
-    assert "excluded n0004:" in log, log
+    line = next((l for l in log.splitlines() if l.startswith("Series ")), "")
+    assert line.startswith("Series n0001..n0003: n=3 (1 excluded)"), log
+    assert "from log" not in line, line
+    assert len([l for l in log.splitlines() if l.startswith("Series ")]) == 1
     per_frame = [float(l.split("SR")[1].split()[0])
                  for l in log.splitlines()
                  if l.startswith("Image n000") and "  SR " in l]
     assert len(per_frame) == 3, log
-    sr_line = next(l for l in log.splitlines()
-                   if l.strip().startswith("SR "))
     # the log rounds each frame to 3 decimals; the summary uses full
     # precision, so compare to within that rounding
-    mean_txt = float(sr_line.split("mean")[1].split()[0])
-    std_txt = float(sr_line.split("stdev")[1].split()[0])
-    assert abs(mean_txt - np.mean(per_frame)) <= 0.0015, (sr_line, per_frame)
-    assert abs(std_txt - np.std(per_frame, ddof=1)) <= 0.0015, sr_line
-    print(f"  [ok] end to end: {sr_line.strip()}")
+    mean_txt, std_txt = line.split("SR ")[1].split()[0].split("±")
+    assert abs(float(mean_txt) - np.mean(per_frame)) <= 0.0015, (line, per_frame)
+    assert abs(float(std_txt) - np.std(per_frame, ddof=1)) <= 0.0015, line
+    dlg, table = win._n2_series_dialog, win._n2_series_table
+    assert dlg.isVisible() and dlg.width() <= 600, dlg.size()
+    assert table.item(0, 0).text() == mean_txt, (table.item(0, 0).text(), mean_txt)
+    assert table.item(0, 1).text() == std_txt
+    print(f"  [ok] end to end: {line}")
+
+    # same frames again: all taken from the log, nothing re-measured
+    def no_run(files=None):
+        raise AssertionError(f"re-measured {files}")
+    win._nirc2_start = no_run
+    win.n2_files.clearSelection()
+    for i in range(3):
+        win.n2_files.item(i).setSelected(True)
+    win.n2_log.clear()
+    win._on_nirc2_series_stats()
+    line2 = win.n2_log.toPlainText().strip()
+    assert line2.startswith("Series n0001..n0003: n=3 (3 from log)"), line2
+    assert line2.split("SR ")[1].split()[0] == f"{mean_txt}±{std_txt}", line2
+    print("  [ok] logged frames are reused, not re-measured")
 
     # refused start (no AUTOFIND) leaves no series pending
     win.n2_autofind.setChecked(False)

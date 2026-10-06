@@ -75,6 +75,37 @@ def summarize_series(items):
                        excluded=tuple(excluded), metrics=metrics)
 
 
+_LINE_FMT = (("strehl", "SR", "{:.3f}", ""),
+             ("fwhm_mas", "FWHM", "{:.2f}", " mas"),
+             ("wfe_nm", "WFE", "{:.1f}", " nm"))
+
+
+def format_series_line(st, from_log=0):
+    """The one-line log entry for a series: frame span, n used, how many
+    were excluded / taken from the log, then mean±stdev per metric."""
+    if not st.labels:
+        span = "(none)"
+    elif st.n == 1:
+        span = st.labels[0]
+    else:
+        span = f"{st.labels[0]}..{st.labels[-1]}"
+    notes = []
+    if st.excluded:
+        notes.append(f"{len(st.excluded)} excluded")
+    if from_log:
+        notes.append(f"{from_log} from log")
+    head = f"Series {span}: n={st.n}" + (f" ({', '.join(notes)})"
+                                          if notes else "")
+    if not st.metrics:
+        return head + "  no usable frames"
+    parts = []
+    for key, name, fmt, unit in _LINE_FMT:
+        m = st.metrics[key]
+        std = "—" if math.isnan(m.std) else fmt.format(m.std)
+        parts.append(f"{name} {fmt.format(m.mean)}±{std}{unit}")
+    return head + "  " + "  ".join(parts)
+
+
 def format_series_stats(st):
     """Log lines: one per metric, then one per excluded frame."""
     head = f"Series stats: {st.n} frame(s)"

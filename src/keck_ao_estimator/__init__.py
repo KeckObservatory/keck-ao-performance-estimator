@@ -84,7 +84,7 @@ from .geometry import (
 from .gs_ranking import rank_guide_stars
 from .series_stats import (
     SERIES_METRICS, MetricStats, SeriesStats, exclusion_reason,
-    format_series_stats, summarize_series,
+    format_series_line, format_series_stats, summarize_series,
 )
 from .image_strehl import (
     CROWDING_WARN_FRAC, EDGE_CLIP_WARN_FRAC, SR_ERR_MAX, Nirc2StrehlResult,
