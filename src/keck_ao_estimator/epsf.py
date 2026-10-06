@@ -290,6 +290,7 @@ class StarCatalog(list):
 
     @property
     def cap_note(self):
+        """Log-ready note when the catalogue hit its n_max cap ('' otherwise)."""
         return ("" if not self.truncated else
                 f" CATALOGUE TRUNCATED at n_max={self.n_max}: neighbours "
                 f"beyond it are NOT subtracted, and the field is denser "

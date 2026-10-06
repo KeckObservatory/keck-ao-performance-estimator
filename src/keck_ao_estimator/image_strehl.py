@@ -26,7 +26,7 @@ Index convention: numpy arrays are [row, col] = [y, x]; all (x, y)
 arguments and results use IDL/detector convention (x = column).
 
 Known deviations from the IDL original, all documented against the golden
-outputs in the regress model: the pupil rasterizer matches POLYFILLV to
+outputs in the regression tests: the pupil rasterizer matches POLYFILLV to
 15/262144 pixels (see nirc2_psf._fill_polygon), leaving measured Strehl
 within 0.001 of the IDL tool; the radial-profile spline is a natural
 cubic rather than IDL SPLINE's tension-1.0 spline; the saturation check
@@ -557,8 +557,11 @@ def reduce_frame(raw, background=None, flat=None, badmask=None):
 
 
 def _packaged_cal_path(name):
-    from importlib.resources import files
-    return str(files("keck_ao_estimator") / "data" / name)
+    # next to this module (data/), so the same file works in the estimator
+    # package and in PyAO's vendored copy (kaotools.strehl_tool)
+    import os
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data",
+                        name)
 
 
 _CAL_CACHE = {}
@@ -589,6 +592,7 @@ def load_nirc2_calibration(flat_path="default", mask_path="default"):
 
 @dataclass(frozen=True)
 class Nirc2StrehlResult:
+    """One Strehl measurement: SR, FWHM, position, photometry and flags."""
     strehl: float
     fwhm_mas: float
     wfe_nm: float
@@ -643,6 +647,7 @@ class Nirc2StrehlResult:
 
     @property
     def crowded(self):
+        """Annulus contamination above CROWDING_WARN_FRAC: the plain-mean sky is suspect."""
         return self.crowding > CROWDING_WARN_FRAC
 
     @property
@@ -661,6 +666,7 @@ class Nirc2StrehlResult:
 
     @property
     def ok(self):
+        """True when the measurement succeeded (no error message)."""
         return self.error == ""
 
 
@@ -1243,7 +1249,7 @@ def measure_field(image, params, positions=None, n_stars=5,
 
     `workers > 1` (parallel D.5) computes the same per-star
     `measure_strehl` calls, and the field solution's group models, in the
-    process's persistent pool (`keck_ao_estimator.parallel`) and reads them
+    process's persistent pool (`parallel.py` in this package) and reads them
     back in order, so the returned list is identical to `workers=1`, the
     default.  `workers=None` takes $KECK_AO_WORKERS, else
     `min(8, cpu_count // 2)`; more than 8 is refused unless

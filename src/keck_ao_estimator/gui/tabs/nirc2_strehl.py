@@ -167,15 +167,29 @@ class Nirc2StrehlTabMixin:
         form.addRow(self._wrap(inst_row))
 
         self.n2_im1 = QtWidgets.QSpinBox()
-        self.n2_im1.setRange(0, 9999)
+        self.n2_im1.setRange(0, 999999)
         self.n2_im1.setValue(1)
-        form.addRow("First image:", self.n2_im1)
+        # numbered frames are <PREFIX><number>: NIRC2 n + 4 digits, OSIRIS
+        # e.g. i260723_a + 6 digits (in sync with PyAO's strehl_tool)
+        self.n2_prefix = QtWidgets.QLineEdit("n")
+        self.n2_prefix.setMaximumWidth(110)
+        self.n2_prefix.setToolTip(
+            "Numbered-frame prefix: NIRC2 'n' (n0007.fits), OSIRIS e.g. "
+            "'i260723_a' (i260723_a003002.fits, 6 digits). Remembered per "
+            "instrument; for OSIRIS it fills in from the frames in PATH.")
+        self._n2_inst_prefixes = {"NIRC2": "n", "OSIRIS": ""}
+        im1_row = QtWidgets.QHBoxLayout()
+        im1_row.setContentsMargins(0, 0, 0, 0)
+        im1_row.addWidget(self.n2_im1)
+        im1_row.addWidget(QtWidgets.QLabel("Prefix:"))
+        im1_row.addWidget(self.n2_prefix)
+        form.addRow("First image:", self._wrap(im1_row))
         self.n2_nim = QtWidgets.QSpinBox()
         self.n2_nim.setRange(1, 999)
         self.n2_nim.setValue(1)
         form.addRow("Images:", self.n2_nim)
         self.n2_bg1 = QtWidgets.QSpinBox()
-        self.n2_bg1.setRange(0, 9999)
+        self.n2_bg1.setRange(0, 999999)
         self.n2_bg1.setValue(2)
         form.addRow("First background:", self.n2_bg1)
         self.n2_nbg = QtWidgets.QSpinBox()
@@ -859,6 +873,14 @@ class Nirc2StrehlTabMixin:
         if self._nirc2_kind() == "nirc2":
             from ...frame_watch import is_unp_frame
             names = [n for n in names if not is_unp_frame(n)]
+        elif not self.n2_prefix.text().strip():
+            # OSIRIS: take the numbered prefix (i<YYMMDD>_a) from the frames
+            import re
+            for n in names:
+                m = re.match(r"^(i\d{6}_a)\d{6}\.fits$", n)
+                if m is not None:
+                    self.n2_prefix.setText(m.group(1))
+                    break
         for name in names:
             item = QtWidgets.QListWidgetItem(name)
             item.setData(QtCore.Qt.ItemDataRole.UserRole, name)
@@ -895,7 +917,8 @@ class Nirc2StrehlTabMixin:
         import os
         import re
         disk_name = item.data(QtCore.Qt.ItemDataRole.UserRole) or item.text()
-        m = re.match(r"^n(\d{4})\.fits$", disk_name)
+        m = re.match(rf"^{re.escape(self.n2_prefix.text().strip())}"
+                     rf"(\d{{{self._nirc2_digits()}}})\.fits$", disk_name)
         if m is not None:       # summit-numbered frame: drive FIRST IMAGE
             self.n2_im1.setValue(int(m.group(1)))
             self.n2_nim.setValue(1)
@@ -930,10 +953,21 @@ class Nirc2StrehlTabMixin:
     def _nirc2_kind(self):
         return self.n2_instrument.currentText().lower()   # nirc2 / osiris
 
+    def _nirc2_digits(self):
+        """Frame-number width: NIRC2 n0007 (4), OSIRIS i260723_a003002 (6)."""
+        return 6 if self._nirc2_kind() == "osiris" else 4
+
+    def _nirc2_numbered_name(self, no):
+        """The numbered frame's file stem, <PREFIX><number>."""
+        return f"{self.n2_prefix.text().strip()}{int(no):0{self._nirc2_digits()}d}"
+
     def _on_nirc2_instrument(self, text):
         old = self._n2_inst_current
         self._n2_inst_paths[old] = self.n2_path.text()
+        self._n2_inst_prefixes[old] = self.n2_prefix.text()
         self._n2_inst_current = text
+        self.n2_prefix.setText(self._n2_inst_prefixes.get(
+            text, "n" if text == "NIRC2" else ""))
         if self.n2_watch.isChecked():
             self.n2_watch.setChecked(False)     # never carry polling over
         self.n2_path.setText(self._n2_inst_paths.get(text, ""))
@@ -1272,14 +1306,15 @@ class Nirc2StrehlTabMixin:
                 "cleaning applies to 'Measure field' (and to clicks "
                 "after it), not to a single-frame Measure")
         self._n2_worker = Nirc2MeasureWorker(
-            path, "n", self.n2_im1.value(), self.n2_nim.value(),
+            path, self.n2_prefix.text().strip(), self.n2_im1.value(),
+            self.n2_nim.value(),
             self.n2_bg1.value(), self.n2_nbg.value(), self._nirc2_radii(),
             autofind=self.n2_autofind.isChecked(), files=files,
             robust_sky=self.n2_robust_sky.isChecked(),
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
             psf_clean=False, idl_version=self._nirc2_idl_version(),
-            parent=self)
+            digits=self._nirc2_digits(), parent=self)
         self._n2_worker.frame_done.connect(self._on_nirc2_frame_done)
         self._n2_worker.frame_failed.connect(self._on_nirc2_frame_failed)
         self._n2_worker.finished_all.connect(self._on_nirc2_finished)
@@ -1309,8 +1344,9 @@ class Nirc2StrehlTabMixin:
                 for it in items]
         else:
             first = self.n2_im1.value()
-            req = [(f"n{no:04d}", os.path.join(path, f"n{no:04d}.fits"))
-                   for no in range(first, first + self.n2_nim.value())]
+            req = [(self._nirc2_numbered_name(no), os.path.join(
+                path, self._nirc2_numbered_name(no) + ".fits"))
+                for no in range(first, first + self.n2_nim.value())]
         # frames already measured AND logged are taken from the log
         # (Eduardo 2026-10-06), only the rest is measured
         logged = getattr(self, "_n2_logged_results", {})
@@ -1335,13 +1371,12 @@ class Nirc2StrehlTabMixin:
         # GO! afterwards re-measures the frame on screen, not the series
         self._n2_loaded_files = todo[-1:]
 
-    @staticmethod
-    def _nirc2_frame_key(imno):
+    def _nirc2_frame_key(self, imno):
         """The log/series key of a frame: numbered GO! labels frames by
         number -- as the STRING "7" (the worker's str(no)) -- a file run by
-        name (n0007); both mean n0007."""
+        name (n0007); both mean <PREFIX>0007."""
         s = str(imno)
-        return f"n{int(s):04d}" if s.isdigit() else s
+        return self._nirc2_numbered_name(s) if s.isdigit() else s
 
     def _nirc2_series_finish(self):
         """Summarize the collected series: one line in the log and a small
@@ -3642,8 +3677,9 @@ class Nirc2StrehlTabMixin:
         if files is not None:
             return list(files)
         im1, nim = self.n2_im1.value(), self.n2_nim.value()
-        return [(str(no), os.path.join(path, f"n{no:04d}.fits"))
-               for no in range(im1, im1 + nim)]
+        return [(str(no), os.path.join(
+            path, self._nirc2_numbered_name(no) + ".fits"))
+            for no in range(im1, im1 + nim)]
 
     def _nirc2_prefetch_guide_stars(self, seq, on_done):
         """Before a batch run touches any of these files, resolve every

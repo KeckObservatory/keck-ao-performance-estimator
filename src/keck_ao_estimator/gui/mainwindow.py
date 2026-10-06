@@ -70,12 +70,34 @@ def _build_summary(args, prep, res, offsets=None):
     return "  |  ".join(parts)
 
 
+class _CloseStopsThreads:
+    """closeEvent shared by the MainWindow: stop and wait for every running
+    worker thread first -- a QThread destroyed with its window while still
+    running aborts the whole process (found in PyAO's strehl_tool,
+    2026-10-06; the two tools are kept in sync)."""
+
+    def closeEvent(self, event):
+        for t in self.findChildren(QtCore.QThread):
+            if not t.isRunning():
+                continue
+            for name in ("abort", "request_stop"):
+                stop = getattr(t, name, None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except Exception:
+                        pass
+                    break
+            t.wait(10000)
+        super().closeEvent(event)
+
+
 class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                  StarlistPickerMixin,
                  SummaryStatsMixin, NgsTabMixin, LgsTabMixin,
                  WfeTabMixin, PredictionTabMixin, FieldMapMixin,
                  FieldMapOverlaysMixin, FieldMapViewMixin, NighttimeModeMixin,
-                 Nirc2StrehlTabMixin,
+                 Nirc2StrehlTabMixin, _CloseStopsThreads,
                  QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1099,6 +1121,9 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             "nirc2": {
                 "instrument": self.n2_instrument.currentText(),
                 "path": self.n2_path.text(),
+                "instrument_prefixes": {**self._n2_inst_prefixes,
+                                        self._n2_inst_current:
+                                            self.n2_prefix.text()},
                 "instrument_paths": {**self._n2_inst_paths,
                                      self.n2_instrument.currentText():
                                          self.n2_path.text()},
@@ -1275,6 +1300,10 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             n2 = c.get("nirc2", {})
             self.n2_instrument.setCurrentText(n2.get("instrument", "NIRC2"))
             self._n2_inst_paths.update(n2.get("instrument_paths", {}))
+            self._n2_inst_prefixes.update(n2.get("instrument_prefixes", {}))
+            self.n2_prefix.setText(self._n2_inst_prefixes.get(
+                self._n2_inst_current,
+                "n" if self._n2_inst_current == "NIRC2" else ""))
             self.n2_path.setText(n2.get("path", ""))
             self.n2_im1.setValue(int(n2.get("im1", 1)))
             self.n2_nim.setValue(int(n2.get("nim", 1)))

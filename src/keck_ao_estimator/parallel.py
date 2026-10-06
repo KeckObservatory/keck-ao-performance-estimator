@@ -23,7 +23,7 @@ design block D.2 / D.5, PR-D10).
 - Every result is produced by the SAME serial function on the SAME inputs and
   callers reassemble results in submission order, so `workers > 1` returns
   exactly what `workers = 1` returns.  Asserted, not assumed:
-  sr_estimator/regress/parallel_model.py.
+  the parallel regression tests (workers=2 vs workers=1).
 """
 import atexit
 import copy
@@ -168,9 +168,11 @@ class Shared:
         self.nbytes = off
 
     def ref(self):
+        """Picklable reference a worker uses to re-open this block."""
         return (self.token, self.shm.name, self.payload, self.specs)
 
     def close(self):
+        """Release (and unlink) the shared-memory block."""
         self.shm.close()
         try:
             self.shm.unlink()
@@ -330,11 +332,13 @@ class MeasureBatch:
                 self.futs[i] = self.pool.submit(_measure_task, ref, self.positions[i])
 
     def result(self, i):
+        """Result of target i (blocks until it is ready), in submission order."""
         if i not in self.futs:
             self._submit(i, i + (self.ahead or 1))
         return self.futs[i].result()
 
     def close(self):
+        """Cancel every unread future and release the shared state."""
         for f in self.futs.values():
             f.cancel()
         for f in self.futs.values():

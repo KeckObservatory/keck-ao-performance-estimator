@@ -127,6 +127,7 @@ class FieldSolution:
 
     @property
     def n_live(self):
+        """Number of solved stars not dropped from the solution."""
         return sum(1 for s in self.stars if not s.dropped)
 
 

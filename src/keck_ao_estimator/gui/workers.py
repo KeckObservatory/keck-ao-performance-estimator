@@ -195,7 +195,7 @@ class Nirc2MeasureWorker(QThread):
     def __init__(self, path, prefix, im1, nim, bg1, nbg, radii,
                  autofind=True, files=None, robust_sky=False,
                  sky_override=None, auto_radius=False, psf_clean=False,
-                 idl_version=None, parent=None):
+                 idl_version=None, digits=4, parent=None):
         super().__init__(parent)
         self.path, self.prefix = path, prefix
         self.im1, self.nim, self.bg1, self.nbg = im1, nim, bg1, nbg
@@ -207,6 +207,7 @@ class Nirc2MeasureWorker(QThread):
         self.auto_radius = auto_radius
         self.psf_clean = psf_clean
         self.idl_version = idl_version   # None = the engine default
+        self.digits = digits    # frame-number width: NIRC2 4, OSIRIS 6
         self._pause_mutex = QtCore.QMutex()
         self._pause_cond = QtCore.QWaitCondition()
         self._paused = False
@@ -244,7 +245,8 @@ class Nirc2MeasureWorker(QThread):
 
     def _fname(self, no):
         import os
-        return os.path.join(self.path, f"{self.prefix}{no:04d}.fits")
+        return os.path.join(self.path,
+                            f"{self.prefix}{no:0{self.digits}d}.fits")
 
     def run(self):
         import numpy as np
@@ -257,12 +259,17 @@ class Nirc2MeasureWorker(QThread):
         from ..nirc2_psf import nirc2_dl_psf
         from ..osiris import detect_instrument, osiris_frame_params
 
+        # a missing calibration no longer stops the run: NIRC2 frames are
+        # then reduced without flat / bad-pixel mask and SHOWN, but not
+        # measured (Eduardo 2026-10-06; in sync with PyAO's strehl_tool)
+        cal_error = None
         try:
             flat, mask = load_nirc2_calibration()
         except Exception as e:
-            self.frame_failed.emit(self.im1, f"calibration: {e}")
-            self.finished_all.emit()
-            return
+            flat = mask = None
+            cal_error = f"calibration unavailable ({type(e).__name__}: {e})"
+            self.frame_failed.emit(self.im1, cal_error + " -- frames are "
+                                   "shown but not measured")
 
         background = None
         if self.nbg > 0:
@@ -325,6 +332,11 @@ class Nirc2MeasureWorker(QThread):
                 key = (params.camname, params.pmsname, params.effwave_um,
                        round(params.pmrangl_deg, 3), params.daytime,
                        params.sfp)
+                if cal_error is not None and inst != "osiris":
+                    from ..image_strehl import _failed
+                    self.frame_done.emit(no, _failed(params, cal_error),
+                                         params, reduced, None, header)
+                    continue
                 if key not in dl_cache:
                     dl_cache.clear()    # keep at most one 512^2 PSF around
                     dl_cache[key] = nirc2_dl_psf(

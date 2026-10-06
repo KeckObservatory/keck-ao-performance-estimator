@@ -42,6 +42,7 @@ THETA0_MIN_STARS = 4
 
 @dataclass
 class FieldStats:
+    """Statistics of a measured Strehl field (see the module docstring)."""
     n: int
     # peak-performance star (arcsec offsets from frame centre, detector)
     peak_sr: float
