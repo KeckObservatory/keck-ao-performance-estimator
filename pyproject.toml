@@ -77,7 +77,7 @@ packages = [
 
 [tool.setuptools.package-data]
 keck_ao_docs = ["*.pdf"]
-keck_ao_estimator = ["data/*.fits.gz", "data/*.zip"]
+keck_ao_estimator = ["data/*.fits.gz", "data/*.zip", "data/*.npz"]
 
 [tool.setuptools.dynamic]
 version = { attr = "keck_ao_estimator._version.__version__" }

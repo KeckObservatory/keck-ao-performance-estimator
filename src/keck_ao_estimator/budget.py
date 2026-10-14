@@ -31,7 +31,7 @@ exist here, with different implications for code OUTSIDE this module:
 import numpy as np
 
 from .constants import REF_TOTAL, REF_FREEATM, V_GROUND, V_FREE, LAMBDA_K_NM
-from .marechal import marechal_strehl
+from .marechal import marechal_strehl, tilt_strehl
 from .tiptilt import (tt_wfe_nm, DEF_TT_MAG, DEF_TT_OFFSET,
                       DEF_LTAO_TT_THETA0_GAIN)
 
@@ -539,7 +539,7 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                v_ground=V_GROUND, v_free=V_FREE, aniso_scale=1.0,
                tt_sensor="strap", tt_spot_theta=None,
                strap_law="sheet", ltao_tt_theta0_gain=None,
-               lgs_flux_azel=None):
+               lgs_flux_azel=None, tilt_law="marechal"):
     """Single-beacon LGS or LTAO Strehl for one sample, at wavelength lam_nm.
 
     Parameters
@@ -577,6 +577,11 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
     lgs_flux_azel : optional (az, el) in degrees. Scales the measurement
                    term with the modelled LGS return at that pointing (see
                    lgs_budget_terms and lgs_flux.py). None -> fixed HOMEAS.
+    tilt_law     : how the tip-tilt term becomes its Strehl factor:
+                   "marechal" (default, exp(-x^2)) or "hardy" (1/(1+x^2));
+                   see marechal.tilt_strehl. The high-order factor is
+                   always Marechal. Only the sky-coverage tab passes
+                   "hardy".
 
     Returns the Strehl at lam_nm (high-order x tip-tilt). The individual nm
     terms are available from lgs_budget_terms() with the same arguments.
@@ -591,4 +596,4 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                  + t["scint"]**2 + t["meas"]**2 + t["nafoc"]**2
                  + t["stat_tel"]**2 + t["stat_calib"]**2 + t["stat_dm"]**2
                  + t["stat_inst"]**2 + t["stat_reg"]**2 + t["margin"]**2)
-    return marechal_strehl(ho, lam_nm) * marechal_strehl(t["tt"], lam_nm)
+    return marechal_strehl(ho, lam_nm) * tilt_strehl(t["tt"], lam_nm, tilt_law)

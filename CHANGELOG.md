@@ -1,7 +1,39 @@
 # Changelog
 
 All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.4.1` in the install URL).
+is released on GitHub only (pin `@v1.5.0` in the install URL).
+
+## 1.5.0 — 2026-10-13
+
+### Added
+- **Sky coverage tab** (last plot tab). Strehl against the fraction of sky
+  that reaches it: Monte-Carlo pointings on a star field, best guide star
+  within the patrol radius per pointing, scored with the field map's own
+  on-axis model.
+  - Options: telescope (K1 / K2), mode (NGS / single-LGS / LTAO), K2 NGS
+    WFS mode (57x57 / 29x29), patrol radius (60″ / 51″), tip-tilt
+    sensor (STRAP / TRICK-H / TRICK-K), tilt-Strehl law (Maréchal / Hardy)
+    and sky field: real Gaia + 2MASS stars at b = 90°, 60°, 30°, 20°, or a
+    synthetic b = 60° field matched to the star counts KAON 1303 publishes
+    for its Besançon-model fields.
+  - Conditions are the ones in use: the Prediction scenario while enabled,
+    else the loaded night at the Field map tab's Conditions selection. WFE
+    sliders and the other dock settings apply.
+  - Hold curve / Clear held for comparisons, an optional KAON 1318 Fig. 12
+    overlay (labelled as computed on synthetic Besançon star fields with the
+    Hardy law), a log sky axis, and a readout of Strehl at fixed sky
+    fractions and sky fraction at fixed Strehls. The selection is saved in
+    the config.
+  - The Hardy law `1/(1+x²)` is a convention what-if for reading against
+    KAON 1303 / 1318: the tip-tilt sensor rows are calibrated through
+    Maréchal, which stays the default everywhere.
+  - Library: `sky_coverage_curve`, `strehl_surface`, `draw_sky_coverage`,
+    `tilt_strehl`; `lgs_strehl(..., tilt_law=)` (default unchanged).
+  - Bundled star fields `data/sky_field_*.npz` (Gaia DR2 G < 20.5 + 2MASS,
+    0.5° cones, and the synthetic field; rebuilt by
+    `sr_estimator/build_sky_fields.py`).
+  - Regression test `gui_phase52`; `gui_phase5` and `gui_phase16` now expect
+    five plot tabs.
 
 ## 1.4.1 — 2026-10-06
 

@@ -572,13 +572,18 @@ class FieldMapMixin:
         else:
             head = (f"{tel} {self.fm_mode.currentText()} {metric_name} across "
                     f"the {sci_fov[0]:g}×{sci_fov[1]:g}″ field\n")
+        return head + self._fm_cond_text(snap, meta["lam_label"])
+
+    def _fm_cond_text(self, snap, lam_label):
+        """One line naming the conditions a snapshot carries: the predicted
+        scenario, or the night sample. Shared with the Sky coverage tab."""
         if snap.get("synthetic"):
-            return (head + f"{meta['lam_label']} · PREDICTED SCENARIO — "
+            return (f"{lam_label} · PREDICTED SCENARIO — "
                     f"DIMM {snap['eps_tot_zenith']:.2f}″ / "
                     f"free-atm {snap['eps_fa_zenith']:.2f}″ at zenith, "
                     f"θ₀ᴷ {snap['theta0_k_zenith']:.1f}″, "
                     f"ZA {snap['zenith_angle_deg']:g}° (X={snap['airmass']:.2f})")
-        return (head + f"{meta['lam_label']} · "
+        return (f"{lam_label} · "
                 f"{self._tz_text(snap['when_desc'])} "
                 f"({self._fmt_hm(snap['t_hst'])}, X={snap['airmass']:.2f}, "
                 f"seeing {snap['eps_tot_los']:.2f}″, θ₀ {snap['theta0_los']:.1f}″)")

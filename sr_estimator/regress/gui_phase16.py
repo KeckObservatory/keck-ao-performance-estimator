@@ -122,7 +122,7 @@ def gui_tab():
     app = QtWidgets.QApplication(sys.argv[:1])
     win = gui.MainWindow(); win.resize(1550, 950); win.show(); app.processEvents()
     # 3 plot tabs incl. Field map
-    assert win.plot_tabs.count() == 4 and win.plot_tabs.tabText(1) == "Field map"
+    assert win.plot_tabs.count() == 5 and win.plot_tabs.tabText(1) == "Field map"
 
     win.mode_local.setChecked(True)
     win.dimm_edit.setText(f"{DATA}/20260525_dimm.dat")

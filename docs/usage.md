@@ -30,7 +30,8 @@ The GUI is organised as tabs that feed one shared engine:
 - **SR tool** — measure Strehl, FWHM and wavefront error directly from a NIRC2
   or OSIRIS frame and compare them against the prediction for that instant.
 
-Plot tabs show the **Timeline**, the **Field map**, and the **Error terms**.
+Plot tabs show the **Timeline**, the **Field map**, the **Error terms**, the
+**Measured SR** tool and the **Sky coverage**.
 
 ### SR tool
 
@@ -148,6 +149,64 @@ measured number. On it you can:
   which fills in its position and its magnitude — the catalogue's own band if it
   has it, otherwise an estimate of the sensing band from a published colour
   transform (flagged as an estimate).
+
+### Sky coverage
+
+The last plot tab draws Strehl against the fraction of sky that reaches it:
+20 000 pointings are dropped on a star field, each keeps the best guide
+star within the patrol radius (brightness traded against distance), and the
+sorted results are the curve. A star at a given magnitude and offset scores exactly what the
+field map shows on axis for that star.
+
+Options on the tab:
+
+- **Telescope** — K1 or K2. It follows the Data tab's telescope and can be set
+  to the other one.
+- **Mode** — NGS (each star tried as the wavefront guide star), single-LGS or
+  LTAO (each star tried as the tip-tilt star).
+- **K2 NGS WFS** — 57x57 or 29x29, for K2 in NGS mode. It follows the NGS
+  tab's WFS mode. The 29x29 fit is preliminary.
+- **TT sensor** — STRAP (R), TRICK (H) or TRICK (K); TRICK is K1-only and puts
+  the science band in the other of H / K.
+- **Tilt Strehl** — Maréchal `exp(−x²)` or Hardy `1/(1+x²)` for the tip-tilt
+  factor. Maréchal is what the rest of the estimator uses and what the
+  tip-tilt sensor rows were calibrated through. Hardy is the form KAON 1303
+  and KAON 1318 use, so pick it to read a curve against theirs; it is a
+  convention what-if, not a second calibrated prediction, and it reads higher
+  at large sky fractions. It does not apply to NGS.
+- **Patrol** — the radius a guide star can be picked within: 60″ (the
+  unvignetted radius, and the field map's field of regard) or 51″ (what
+  KAON 1318 used).
+- **Sky field** — real stars (Gaia + 2MASS) at galactic latitude 90°, 60°
+  (the KAON 1318 sight line), 30° or 20°, or a **synthetic** b = 60° field.
+  The synthetic field is random positions with power-law magnitudes, matched
+  to the star counts KAON 1303 §5.11 publishes for its Besançon-model fields
+  (0.40 usable stars per arcmin², 0.30 dex/mag, R ≤ 19 / H ≤ 17). It is not a
+  Besançon model run. It has about 2–3× fewer stars brighter than magnitude
+  15 than the real b = 60° field, so its curves fall faster over the first
+  10 % of sky.
+
+The conditions are the ones the estimator is using: the **Prediction** tab's
+scenario while it is enabled, otherwise the loaded night at the Field map
+tab's *Conditions* selection. The figure title names them. The LGS offset,
+winds, NGS fit, WFE sliders and science band are read from the left dock.
+
+**Hold curve** keeps the current curve as a thin line for comparison (a held
+curve identical to the current one is not listed twice);
+**KAON 1318 Fig. 12** overlays that figure's target curve for STRAP or
+TRICK-H; **log sky axis** opens up the first few percent, where NGS curves
+live. The KAON 1318 curve is for KAPA LTAO with one tip-tilt star at b = 60°,
+ZA 30°, and was computed on **synthetic Besançon-model star fields** with the
+Hardy law and a 51″ patrol radius. To read a curve against it like for like,
+select the synthetic sky field, the Hardy law and the 51″ patrol. The box on the
+plot, headed with the configuration it reads and outlined in that curve's
+colour, lists the Strehl at fixed sky fractions and the sky fraction reaching
+fixed Strehls. A curve ends where the sky runs out of stars inside the faint
+limit (R ≤ 19, H / K ≤ 17).
+
+The real star fields are Gaia DR2 (G < 20.5) and 2MASS in 0.5° cones. Gaia G
+stands in for R, and 2MASS is complete only to H ≈ 15.1 / K ≈ 14.3, so TRICK
+curves on them are conservative where they depend on fainter stars.
 
 ## Parallelism
 

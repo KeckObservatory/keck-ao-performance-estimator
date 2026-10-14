@@ -722,6 +722,7 @@ class PredictionTabMixin:
             self._render_field_map_if_visible()
             self._terms_dirty = True
             self._render_terms_if_visible()
+            self._render_sky_coverage_if_visible()
 
     def _sync_pred_ui(self):
         """Reflect the prediction enable state: the field-map Conditions
@@ -749,6 +750,7 @@ class PredictionTabMixin:
             self.plot_tabs.setCurrentIndex(1)      # renders via tab-change hook
         self._render_field_map_if_visible()
         self._render_terms_if_visible()
+        self._render_sky_coverage_if_visible()
 
     # ---- small UI utilities -------------------------------------------------
     def _update_m_readout(self, args, res):

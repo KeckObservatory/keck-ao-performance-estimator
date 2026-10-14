@@ -125,7 +125,7 @@ from .psf_fit import (
     component_footprint, group_fit, select_neighbours,
 )
 from .io import fetch_mkwc_files, load_mass_profile, load_seeing_series, parse_dt, parse_secs
-from .marechal import marechal_strehl
+from .marechal import TILT_LAWS, marechal_strehl, tilt_strehl
 from .nirc2 import (
     AO_OPS_MODE_NAMES, NIRC2_BG_INNER_RADIUS_ARCSEC,
     NIRC2_BG_OUTER_RADIUS_ARCSEC, NIRC2_FILTER_NAMES,
@@ -162,6 +162,12 @@ from .psf import (OPEN_LOOP_TILT_ONEAXIS_MAS,
                   OPEN_LOOP_TILT_ONEAXIS_MAS_KOLMOGOROV, OUTER_SCALE_M,
                   fwhm_gaussfit_mas, fwhm_gaussfit_sky_mas, fwhm_srtool_mas,
                   psf_fwhm_mas, set_outer_scale)
+from .sky_coverage import (
+    COVERAGE_LEVELS, DEF_SKY_FIELD, KAON1318_FIG12, KAON1318_FIG12_LABEL,
+    PATROL_RADII_ARCSEC, PATROL_RADIUS_ARCSEC, SKY_FIELDS, draw_sky_coverage,
+    is_synthetic_field,
+    load_sky_field, sky_coverage_curve, strehl_surface, synthetic_sky_field,
+)
 from .starlist import (
     entry_float, format_starlist_line, parse_starlist, parse_starlist_text,
     same_star_name, write_starlist,

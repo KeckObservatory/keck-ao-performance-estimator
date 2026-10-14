@@ -28,7 +28,7 @@ def main():
     pump(lambda: win.res is not None)
 
     # terms tab present + enabled (MASS data available)
-    assert win.plot_tabs.count() == 4, "expected 4 plot tabs (Timeline/Field/Terms/NIRC2)"
+    assert win.plot_tabs.count() == 5, "expected 5 plot tabs (Timeline/Field/Terms/NIRC2/Sky coverage)"
     assert win.plot_tabs.isTabEnabled(2), "terms tab should be enabled"
     print("  [ok] terms tab present and enabled")
 

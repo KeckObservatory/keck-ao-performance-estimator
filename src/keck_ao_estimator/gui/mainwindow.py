@@ -40,6 +40,7 @@ from .tabs.ngs import NgsTabMixin
 from .tabs.nighttime import NighttimeModeMixin
 from .tabs.nirc2_strehl import Nirc2StrehlTabMixin, _resolve_workers_safe
 from .tabs.prediction import PredictionTabMixin
+from .tabs.sky_coverage import SkyCoverageTabMixin
 from .tabs.starlist_picker import StarlistPickerMixin
 from .tabs.summary_stats import SummaryStatsMixin
 from .tabs.target import TargetTabMixin
@@ -97,7 +98,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                  SummaryStatsMixin, NgsTabMixin, LgsTabMixin,
                  WfeTabMixin, PredictionTabMixin, FieldMapMixin,
                  FieldMapOverlaysMixin, FieldMapViewMixin, NighttimeModeMixin,
-                 Nirc2StrehlTabMixin, _CloseStopsThreads,
+                 Nirc2StrehlTabMixin, SkyCoverageTabMixin, _CloseStopsThreads,
                  QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -204,6 +205,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         self.plot_tabs.addTab(self._build_field_map_tab(), "Field map")
         self.plot_tabs.addTab(self._terms_holder["widget"], "Error terms")
         self.plot_tabs.addTab(self._build_nirc2_tab(), "Measured SR")
+        self.plot_tabs.addTab(self._build_sky_coverage_tab(), "Sky coverage")
         # terms + field map are expensive -> render only when their tab is shown
         self.plot_tabs.currentChanged.connect(self._on_plot_tab_changed)
         root.addWidget(self.plot_tabs, 1)
@@ -443,6 +445,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         self._terms_dirty = True
         self._render_field_map_if_visible()
         self._render_terms_if_visible()
+        self._render_sky_coverage_if_visible()
 
     def _on_debounced(self):
         """Debounce fired: either recompute on the cached night, or (for a
@@ -687,6 +690,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self._update_fa_advisory()
             self._show_figure(self._main_holder, fig_main)
             self._render_terms_if_visible()
+            self._render_sky_coverage_if_visible()
             self.setWindowTitle(
                 f"{APP_NAME} v{__version__} — {self.prep.night_date.date()} "
                 f"{args.telescope} "
@@ -737,6 +741,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
     def _on_plot_tab_changed(self, _idx):
         self._render_terms_if_visible()
         self._render_field_map_if_visible()
+        self._render_sky_coverage_if_visible()
 
     # ---- field map ----------------------------------------------------------
     def _render_terms_if_visible(self):
@@ -1000,10 +1005,12 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         if self.res is None:
             return
         tab = self.plot_tabs.currentIndex()
-        if tab in (1, 2):                     # Field map / Error terms
+        if tab in (1, 2) or self._sky_coverage_visible():
             holder, label, default = (
                 (self._fm_holder, "field map", "ao_field_map.png") if tab == 1
-                else (self._terms_holder, "error terms", "ao_terms.png"))
+                else (self._terms_holder, "error terms", "ao_terms.png")
+                if tab == 2
+                else (self._sc_holder, "sky coverage", "ao_sky_coverage.png"))
             dest, _ = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Export PNG", default, "PNG (*.png)")
             if not dest:
@@ -1099,6 +1106,15 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             "fm_mode": self.fm_mode.currentText(),
             "fm_metric": self.fm_metric.currentText(),
             "fm_cond": self.fm_cond.currentText(),
+            "sc_tel": self.sc_tel.currentText(),
+            "sc_mode": self.sc_mode.currentText(),
+            "sc_sensor": self.sc_sensor.currentText(),
+            "sc_law": self.sc_law.currentText(),
+            "sc_ngs_wfs": self.sc_ngs_wfs.currentText(),
+            "sc_patrol": self.sc_patrol.currentData(),
+            "sc_field": self.sc_field.currentData(),
+            "sc_kaon": self.sc_kaon.isChecked(),
+            "sc_logx": self.sc_logx.isChecked(),
             "fm_osiris_mode": self.fm_osiris_mode.currentText(),
             "fm_osiris_scale": self.fm_osiris_scale.currentText(),
             "fm_osiris_lenslet": self.fm_osiris_lenslet.currentText(),
@@ -1274,6 +1290,18 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self.fm_mode.setCurrentText(c.get("fm_mode", self.fm_mode.currentText()))
             self.fm_metric.setCurrentText(c.get("fm_metric", "Strehl"))
             self.fm_cond.setCurrentText(c.get("fm_cond", "observing window"))
+            for combo, key in ((self.sc_tel, "sc_tel"),
+                               (self.sc_mode, "sc_mode"),
+                               (self.sc_sensor, "sc_sensor"),
+                               (self.sc_law, "sc_law"),
+                               (self.sc_ngs_wfs, "sc_ngs_wfs")):
+                combo.setCurrentText(c.get(key, combo.currentText()))
+            self.sc_field.setCurrentIndex(max(0, self.sc_field.findData(
+                c.get("sc_field", engine.DEF_SKY_FIELD))))
+            self.sc_patrol.setCurrentIndex(max(0, self.sc_patrol.findData(
+                float(c.get("sc_patrol", engine.PATROL_RADIUS_ARCSEC)))))
+            self.sc_kaon.setChecked(bool(c.get("sc_kaon", False)))
+            self.sc_logx.setChecked(bool(c.get("sc_logx", False)))
             self.fm_osiris_mode.setCurrentText(
                 c.get("fm_osiris_mode", self.fm_osiris_mode.currentText()))
             self.fm_osiris_scale.setCurrentText(
