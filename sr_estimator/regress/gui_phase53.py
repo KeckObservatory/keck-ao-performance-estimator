@@ -5,8 +5,10 @@ re-measured frame is appended to the image log without the duplicate
 question; every logged row is appended at once to tonight's session journal
 ($KECK_AO_SR_LOG_DIR/sr_tool_<UT date>.csv -- Export CSV's columns and
 rounding, the header once; rows deleted in the table stay in the file); a
-journal that cannot be written is reported once; the text log is appended
-to sr_tool_<UT date>.log when the window closes. Offline;
+journal that cannot be written is reported once; closing asks whether to
+save the text log (2026-10-21: Save appends it to sr_tool_<UT date>.log,
+Cancel keeps the window; never asked offscreen or without measurements);
+OSIRIS Latest scans /s/sdata1100 directly where it is mounted. Offline;
 QT_QPA_PLATFORM=offscreen.
 """
 import csv
@@ -119,17 +121,50 @@ def main():
     win._n2_journal_failed = False
     print("  [ok] unwritable journal: reported once, table unaffected")
 
-    # ---- closing saves the text log --------------------------------------
+    # ---- closing asks whether to save the text log ------------------------
     win.n2_log.appendPlainText("gui_phase53 marker line")
     assert not os.path.exists(log_path)
-    win.close()
+    assert not win._nirc2_close_prompt_enabled(), "offscreen: never asks"
+    win._nirc2_close_prompt_enabled = lambda: True
+    answers = ["cancel", "save_as", "save"]
+    win._nirc2_ask_save_log = lambda: answers.pop(0)
+    win._nirc2_ask_log_path = lambda: ""
+    assert not win.close() and win.isVisible(), "Cancel keeps it open"
+    assert not win.close() and win.isVisible(), "Save As dismissed: open"
+    assert not os.path.exists(log_path)
+    assert win.close() and not win.isVisible()
     app.processEvents()
     saved = open(log_path).read()
     assert saved.startswith("=== measured-SR session closed "), saved[:80]
     assert "gui_phase53 marker line" in saved
     assert f"session journal: {csv_path}" in saved
-    print(f"  [ok] close appended the text log to {log_path}")
+    assert win._nirc2_confirm_close(), "answered once: not asked again"
+    print(f"  [ok] close: Cancel / Save As dismissed keep the window; Save "
+          f"appended the text log to {log_path}")
+
+    # ---- the question is skipped when nothing was measured ---------------
+    w2 = gui.MainWindow()
+    w2._nirc2_close_prompt_enabled = lambda: True
+    w2._nirc2_ask_save_log = _no_prompt_method
+    assert w2.close(), "no measurements: closes without asking"
+    print("  [ok] no measurements: closes without the question")
+
+    # ---- OSIRIS Latest on a locally mounted disk (the AO server) ---------
+    import datetime as dt
+    from keck_ao_estimator import frame_watch as fw
+    disk = tempfile.mkdtemp(prefix="gui53_sdata1100_")
+    for acct, night in (("osiris5", "261021"), ("osiris1", "261019")):
+        os.makedirs(os.path.join(disk, acct, night, "IMAG", "raw"))
+    now = dt.datetime(2026, 10, 21, 6, 0, tzinfo=dt.timezone.utc)
+    path, tonight = fw.find_latest_osiris_night(disk=disk, utc_now=now)
+    assert path == os.path.join(disk, "osiris5", "261021", "IMAG", "raw")
+    assert tonight and fw.split_remote(path) is None
+    print("  [ok] OSIRIS Latest scans a mounted disk directly (local PATH)")
     print("gui_phase53: PASS")
+
+
+def _no_prompt_method():
+    raise AssertionError("the close question must not open")
 
 
 if __name__ == "__main__":

@@ -78,11 +78,12 @@ class _CloseStopsThreads:
     2026-10-06; the two tools are kept in sync)."""
 
     def closeEvent(self, event):
-        # the measured-SR text log goes to tonight's session file first
-        # (Eduardo 2026-10-20: save the log when the tool is closed)
-        save_log = getattr(self, "_nirc2_save_session_log", None)
-        if callable(save_log):
-            save_log()
+        # Measured SR: ask whether to save the text log (Eduardo
+        # 2026-10-21; the X button comes here too). Cancel keeps it open.
+        confirm = getattr(self, "_nirc2_confirm_close", None)
+        if callable(confirm) and not confirm():
+            event.ignore()
+            return
         for t in self.findChildren(QtCore.QThread):
             if not t.isRunning():
                 continue

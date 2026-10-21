@@ -824,10 +824,11 @@ class Nirc2StrehlTabMixin:
         self._n2_session_log_dir = session_log.resolve_log_dir(
             SESSION_LOG_ENV, SESSION_LOG_DEFAULT)
         self._n2_journal_failed = False
+        self._n2_close_confirmed = False   # save-the-log question answered
         self.n2_log.appendPlainText(
             f"session journal: {self._nirc2_session_paths()[0]} (every "
-            "logged measurement is appended; the text log is saved there "
-            "on close)")
+            "logged measurement is appended; on close you are asked whether "
+            "to save the text log)")
         # last TT-star catalogue ring match, tagged with the frame it was
         # run for (see _on_nirc2_tt_star_catalog / _nirc2_resolve_guide_star)
         self._n2_tt_star_resolved = None
@@ -1019,7 +1020,8 @@ class Nirc2StrehlTabMixin:
             self.n2_log.appendPlainText(
                 "! no NIRC2 night directory found under /s/sdata900-907 "
                 "(disks not mounted on this machine?)" if inst == "NIRC2"
-                else "! no OSIRIS night directory found on k2ao:/s/sdata1100")
+                else "! no OSIRIS night directory found on /s/sdata1100 "
+                     "(mounted here, else over rsync via k2ao)")
             return
         self.n2_path.setText(path)
         self.n2_log.appendPlainText(
@@ -4174,14 +4176,14 @@ class Nirc2StrehlTabMixin:
                 f"! session journal: cannot write {csv_path} ({e}) -- "
                 "measurements stay in the table only (Export CSV)")
 
-    def _nirc2_save_session_log(self):
-        """Append the text log to tonight's .log file (called on close;
-        Eduardo 2026-10-20: save the log when the tool is closed). Returns
-        the path, or None when there was nothing to save or it failed."""
+    def _nirc2_save_session_log(self, path=None):
+        """Append the text log to `path`, by default tonight's .log file
+        (offered on close; Eduardo 2026-10-20/21). Returns the path, or
+        None when there was nothing to save or it failed."""
         text = self.n2_log.toPlainText().strip()
         if not text:
             return None
-        log_path = self._nirc2_session_paths()[1]
+        log_path = path or self._nirc2_session_paths()[1]
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         try:
             return session_log.append_text(
@@ -4189,7 +4191,69 @@ class Nirc2StrehlTabMixin:
                 banner=f"=== measured-SR session closed {now} ===")
         except OSError as e:
             print(f"WARNING: session log not saved to {log_path}: {e}")
+            self.n2_log.appendPlainText(f"! log NOT saved to {log_path}: {e}")
             return None
+
+    def _nirc2_close_prompt_enabled(self):
+        """The close question needs someone to answer it: off on Qt's
+        offscreen platform (CI, the headless regress scripts), where a
+        modal box can never be clicked."""
+        return QtWidgets.QApplication.platformName() != "offscreen"
+
+    def _nirc2_ask_save_log(self):
+        """The close question (as in PyAO's strehl_tool): Save (append to
+        tonight's .log), Save As…, Don't Save or Cancel. Returns "save" /
+        "save_as" / "discard" / "cancel"; Escape means Cancel."""
+        csv_path, log_path = self._nirc2_session_paths()
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setWindowTitle("Save the Measured SR log?")
+        box.setText("Save the Measured SR log before closing?")
+        box.setInformativeText(
+            f"Save appends it to {log_path}.\n\nThe measurements themselves "
+            f"are already in {csv_path} (appended as they were made).")
+        R = QtWidgets.QMessageBox.ButtonRole
+        save_btn = box.addButton("Save", R.AcceptRole)
+        as_btn = box.addButton("Save As…", R.ActionRole)
+        discard_btn = box.addButton("Don't Save", R.DestructiveRole)
+        cancel_btn = box.addButton("Cancel", R.RejectRole)
+        box.setDefaultButton(save_btn)
+        box.setEscapeButton(cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        return ("save" if clicked is save_btn else
+                "save_as" if clicked is as_btn else
+                "discard" if clicked is discard_btn else "cancel")
+
+    def _nirc2_ask_log_path(self):
+        """Save As…: a file dialog starting at tonight's .log; '' if cancelled."""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save the Measured SR log", self._nirc2_session_paths()[1],
+            "Log files (*.log *.txt);;All files (*)")
+        return path
+
+    def _nirc2_confirm_close(self):
+        """Called by the main window's closeEvent (the X button included).
+        Asks only when the Measured SR tab logged measurements this session
+        and someone can answer (_nirc2_close_prompt_enabled). True when the
+        window may close; False keeps it open (Cancel, Save As… dismissed,
+        or the save failed -- the reason is then in the log)."""
+        if self._n2_close_confirmed or not self._n2_csv_rows \
+                or not self._nirc2_close_prompt_enabled():
+            return True
+        choice = self._nirc2_ask_save_log()
+        if choice == "cancel":
+            return False
+        if choice in ("save", "save_as"):
+            path = None
+            if choice == "save_as":
+                path = self._nirc2_ask_log_path()
+                if not path:
+                    return False
+            if self._nirc2_save_session_log(path) is None:
+                return False
+        self._n2_close_confirmed = True
+        return True
 
     def _nirc2_ask_duplicate_paused(self, row, dupes):
         """Ask what to do about ONE duplicate frame, with the sequence

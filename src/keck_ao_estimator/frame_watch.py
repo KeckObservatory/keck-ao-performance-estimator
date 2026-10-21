@@ -60,7 +60,8 @@ __all__ = ["FRAME_PATTERNS", "NIRC2_DATA_DISKS", "FITS_BLOCK",
            "wait_for_header", "night_dir_name", "find_latest_night_dir",
            "split_remote", "parse_rsync_listing", "remote_newest_frame",
            "remote_cache_dir", "remote_fetch", "prune_cache",
-           "find_latest_osiris_night", "is_unp_frame"]
+           "find_latest_osiris_night", "find_latest_osiris_night_local",
+           "is_unp_frame"]
 
 FRAME_PATTERNS = {
     "nirc2": re.compile(r"^n(\d{4})\.fits$"),
@@ -355,15 +356,77 @@ def prune_cache(local_dir, keep=_REMOTE_KEEP):
             pass
 
 
+def _osiris_last_write(raw_dir):
+    """mtime of the newest imager frame in an OSIRIS IMAG/raw directory,
+    else of the directory itself, else -1 (missing / unreadable)."""
+    best = -1.0
+    try:
+        with os.scandir(raw_dir) as it:
+            for entry in it:
+                if is_frame_name(entry.name, "osiris"):
+                    try:
+                        best = max(best, entry.stat().st_mtime)
+                    except OSError:
+                        continue
+        if best < 0.0:
+            best = os.stat(raw_dir).st_mtime
+    except OSError:
+        pass
+    return best
+
+
+def find_latest_osiris_night_local(disk=OSIRIS_REMOTE_DISK, utc_now=None):
+    """find_latest_osiris_night() on a LOCALLY mounted OSIRIS disk (the AO
+    server k2aoserver-new mounts /s/sdata1100; the rsync alias ``k2ao``
+    exists only on vm-aodev, so listing it over rsync from the server
+    fails -- Eduardo 2026-10-21). Same rules: the latest-dated
+    ``<account>/<YYMMDD>/`` night (dates after tomorrow's UT ignored),
+    between accounts sharing it the one whose IMAG/raw was written last.
+    Accounts that cannot be read (osiris, osiriseng) are skipped. Returns
+    (``disk/<account>/<YYMMDD>/IMAG/raw``, is_tonight) or (None, False)."""
+    today = _utc_today(utc_now)
+    horizon = today + dt.timedelta(days=1)
+    nights = []
+    accounts = sorted(glob.glob(os.path.join(disk, "osiris*"))
+                      + glob.glob(os.path.join(disk, "osrseng")))
+    for account in accounts:
+        try:
+            with os.scandir(account) as it:
+                for entry in it:
+                    d = _osiris_night_date(entry.name)
+                    if d is not None and d <= horizon and entry.is_dir():
+                        nights.append((d, os.path.basename(account),
+                                       entry.name))
+        except OSError:
+            continue
+    if not nights:
+        return None, False
+    latest = max(n[0] for n in nights)
+    candidates = [os.path.join(disk, a, night, "IMAG", "raw")
+                  for d, a, night in nights if d == latest]
+    best = max(sorted(candidates), key=_osiris_last_write)
+    return best, latest >= today
+
+
 def find_latest_osiris_night(host=OSIRIS_REMOTE_HOST,
                              disk=OSIRIS_REMOTE_DISK, utc_now=None,
-                             timeout=90.0):
-    """Tonight's OSIRIS imager directory, over rsync: the latest-dated
+                             timeout=90.0, local=None):
+    """Tonight's OSIRIS imager directory: the latest-dated
     ``<account>/<YYMMDD>/`` night on `disk` (dates after tomorrow's UT
     ignored), and between accounts sharing it the one whose IMAG/raw was
-    written last. One or two rsync listings (2-20 s seen). Returns
-    (``host:disk/<account>/<YYMMDD>/IMAG/raw``, is_tonight) or
-    (None, False); raises OSError when the host can't be listed."""
+    written last.
+
+    When `disk` is mounted on this machine (`local` None = test with
+    os.path.isdir, which also triggers an autofs mount) it is scanned
+    directly and a LOCAL path is returned (find_latest_osiris_night_local:
+    the AO server). Otherwise it is listed over rsync through `host`: one
+    or two listings (2-20 s seen), returning
+    (``host:disk/<account>/<YYMMDD>/IMAG/raw``, is_tonight), and OSError
+    when the host can't be listed. (None, False) when no night is found."""
+    if local is None:
+        local = os.path.isdir(disk)
+    if local:
+        return find_latest_osiris_night_local(disk, utc_now=utc_now)
     today = _utc_today(utc_now)
     horizon = today + dt.timedelta(days=1)
     account_filters = [("include", "/osiris*/"), ("include", "/osrseng/")]

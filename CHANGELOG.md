@@ -19,6 +19,11 @@ sync.
   after `HEADER_WAIT_S` (20 s) it measures anyway so the refusal shows in the
   log. The measure worker waits the same way when GO! lands on a frame whose
   header has no identity yet (`wait_for_header`).
+- **OSIRIS Latest failed on the AO server.** It always listed `/s/sdata1100`
+  over rsync through the ssh alias `k2ao`, which exists only on vm-aodev.
+  Where the disk is mounted (k2aoserver-new) it is now scanned directly and a
+  local PATH is returned (`find_latest_osiris_night_local`); rsync stays the
+  fallback elsewhere.
 
 ### Changed
 - **Duplicates are always appended.** Re-measuring a frame/star already in
@@ -31,9 +36,12 @@ sync.
 - **Session journal** (`session_log.py`, synced to PyAO): every logged
   measurement is appended as it happens to
   `$KECK_AO_SR_LOG_DIR/sr_tool_<UT date>.csv` (default `~/keck_ao_sr_logs`),
-  same columns and rounding as Export CSV, header written once; on close the
-  text log is appended to `sr_tool_<UT date>.log`. The journal is
-  append-only: rows deleted in the table stay in the file.
+  same columns and rounding as Export CSV, header written once. The journal
+  is append-only: rows deleted in the table stay in the file.
+- **Close asks to save the log** (the X button too) when the Measured SR tab
+  logged measurements: Save appends the text log to `sr_tool_<UT date>.log`,
+  Save As… picks a file, Don't Save skips it, Cancel keeps the window open.
+  Never asked on Qt's offscreen platform.
 
 ## 1.5.0 — 2026-10-13
 
