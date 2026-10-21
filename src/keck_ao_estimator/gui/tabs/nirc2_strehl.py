@@ -23,6 +23,8 @@ points PATH at tonight's NIRC2 directory on the NFS-mounted /s/sdata9NN
 disks (frame_watch.find_latest_night_dir -- the summit tool's KTL
 `runname` lookup is not available off the summit hosts).
 """
+from datetime import datetime, timezone
+
 import numpy as np
 import matplotlib.patheffects as patheffects
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -31,6 +33,7 @@ from matplotlib.figure import Figure
 from qtcompat import Qt, QtCore, QtWidgets
 
 import keck_ao_estimator as engine
+from keck_ao_estimator import session_log
 
 from ..theme import set_cue
 from ..widgets import SortableItem, _dspin, _shrinkable_label
@@ -50,6 +53,16 @@ _TEXT_HALO = [patheffects.withStroke(linewidth=2.2, foreground="white")]
 # and guide_star added same day (2026-07-28, second pass): the AO ops
 # mode (AOOPSMOD, decoded) and the guide star's resolved IDENTITY, not
 # just its magnitude -- see _nirc2_resolve_guide_star.
+# What a re-measurement of a frame/star already in the image log does:
+# "append" (no question asked), "overwrite", "skip", or None to ask with
+# the Append / Overwrite / Don't add box. Always append since 2026-10-20
+# (Eduardo, from the summit): the modal question paused night-time
+# auto-measure runs, and the session journal is append-only anyway.
+DUPLICATE_POLICY = "append"
+# where the per-night session journal (.csv) and text log (.log) go
+SESSION_LOG_ENV = "KECK_AO_SR_LOG_DIR"
+SESSION_LOG_DEFAULT = "~/keck_ao_sr_logs"
+
 NIRC2_CSV_COLUMNS = [
     ("time_utc", "Time (UTC)"),
     ("frame_number", "Frame #"),
@@ -255,11 +268,12 @@ class Nirc2StrehlTabMixin:
         form = QtWidgets.QFormLayout(gb_phot)
 
         self.n2_robust_sky = QtWidgets.QCheckBox("Robust sky (σ-clip)")
+        self.n2_robust_sky.setChecked(True)     # default on (Eduardo 2026-10-20)
         self.n2_robust_sky.setToolTip(
             "Sky from the annulus' σ-clipped MEDIAN instead of mvdaper's "
-            "plain mean — use in crowded fields, where neighbors in the "
-            "annulus drag the mean high (the CROWDED warning). Off = "
-            "byte-faithful to the summit IDL tool.")
+            "plain mean — neighbors in the annulus drag the mean high (the "
+            "CROWDED warning). On by default (2026-10-20); untick for the "
+            "summit IDL tool's byte-faithful plain mean.")
         self.n2_pick_sky = QtWidgets.QPushButton("Pick sky")
         self.n2_pick_sky.setCheckable(True)
         self.n2_pick_sky.setToolTip(
@@ -801,10 +815,19 @@ class Nirc2StrehlTabMixin:
         # source of truth
         self._n2_csv_rows = []
         self._n2_csv_table = None
-        self._n2_dup_batch_policy = None   # "all remaining" choice, per run
+        self._n2_dup_batch_policy = DUPLICATE_POLICY   # per run, see above
         self._n2_dup_pending = []          # arrived while a dialog was open
         self._n2_dup_dialog_open = False   # re-entrancy guard
         self._n2_draining = False          # drain-loop re-entrancy guard
+        # per-night session journal: every logged row is appended to the
+        # CSV as it happens; the text log is appended on close
+        self._n2_session_log_dir = session_log.resolve_log_dir(
+            SESSION_LOG_ENV, SESSION_LOG_DEFAULT)
+        self._n2_journal_failed = False
+        self.n2_log.appendPlainText(
+            f"session journal: {self._nirc2_session_paths()[0]} (every "
+            "logged measurement is appended; the text log is saved there "
+            "on close)")
         # last TT-star catalogue ring match, tagged with the frame it was
         # run for (see _on_nirc2_tt_star_catalog / _nirc2_resolve_guide_star)
         self._n2_tt_star_resolved = None
@@ -1269,9 +1292,9 @@ class Nirc2StrehlTabMixin:
         self._n2_loaded_files = files
         self._n2_loaded_seq = self._nirc2_seq_state()
         self.n2_go.setEnabled(False)
-        # a fresh run starts with no remembered duplicate-handling choice
-        # -- see _nirc2_ask_duplicate_paused
-        self._n2_dup_batch_policy = None
+        # a fresh run starts from the module default (DUPLICATE_POLICY;
+        # None would ask -- see _nirc2_ask_duplicate_paused)
+        self._n2_dup_batch_policy = DUPLICATE_POLICY
         self._n2_dup_pending = []
         # resolve every distinct target's guide star BEFORE any frame is
         # measured (see _nirc2_prefetch_guide_stars) -- so a whole-night
@@ -4123,13 +4146,50 @@ class Nirc2StrehlTabMixin:
                 # settle anything that landed in-flight behind the dialog
                 self._nirc2_drain_pending_duplicates()
                 return
-            self._n2_csv_rows.append(row)
+            self._nirc2_append_row(row)
             if self._n2_csv_table is not None:
                 self._nirc2_fill_csv_table(self._n2_csv_table)
         except Exception as ex:
             self.n2_log.appendPlainText(
                 f"! image log: failed to record this measurement ({ex}) "
                 "-- the measurement itself is unaffected")
+
+    def _nirc2_session_paths(self):
+        """(csv, log) paths of tonight's session journal and text log."""
+        return session_log.session_paths(self._n2_session_log_dir)
+
+    def _nirc2_append_row(self, row):
+        """Add `row` to the image log AND append it to tonight's CSV journal
+        (session_log), so a close or a crash loses nothing. A journal that
+        cannot be written is reported once; the table keeps working."""
+        self._n2_csv_rows.append(row)
+        if self._n2_journal_failed:
+            return
+        csv_path = self._nirc2_session_paths()[0]
+        try:
+            session_log.append_csv_row(csv_path, NIRC2_CSV_COLUMNS, row)
+        except OSError as e:
+            self._n2_journal_failed = True
+            self.n2_log.appendPlainText(
+                f"! session journal: cannot write {csv_path} ({e}) -- "
+                "measurements stay in the table only (Export CSV)")
+
+    def _nirc2_save_session_log(self):
+        """Append the text log to tonight's .log file (called on close;
+        Eduardo 2026-10-20: save the log when the tool is closed). Returns
+        the path, or None when there was nothing to save or it failed."""
+        text = self.n2_log.toPlainText().strip()
+        if not text:
+            return None
+        log_path = self._nirc2_session_paths()[1]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        try:
+            return session_log.append_text(
+                log_path, text,
+                banner=f"=== measured-SR session closed {now} ===")
+        except OSError as e:
+            print(f"WARNING: session log not saved to {log_path}: {e}")
+            return None
 
     def _nirc2_ask_duplicate_paused(self, row, dupes):
         """Ask what to do about ONE duplicate frame, with the sequence
@@ -4196,7 +4256,7 @@ class Nirc2StrehlTabMixin:
         if policy == "overwrite":
             for i in sorted(dupes, reverse=True):
                 del self._n2_csv_rows[i]
-        self._n2_csv_rows.append(row)
+        self._nirc2_append_row(row)
         if self._n2_csv_table is not None:
             self._nirc2_fill_csv_table(self._n2_csv_table)
 
@@ -4223,7 +4283,7 @@ class Nirc2StrehlTabMixin:
             row = self._n2_dup_pending.pop(0)
             dupes = self._nirc2_find_duplicate_rows(row)
             if not dupes:                  # earlier choice already cleared it
-                self._n2_csv_rows.append(row)
+                self._nirc2_append_row(row)
                 continue
             policy = getattr(self, "_n2_dup_batch_policy", None)
             if policy is None:

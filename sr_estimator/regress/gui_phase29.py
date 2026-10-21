@@ -233,22 +233,23 @@ def main():
     n_before = len(win.n2_log.toPlainText().splitlines())
     ev = SimpleNamespace(xdata=float(x0), ydata=float(y0),
                          inaxes=win.n2_fig.axes[0])
-    # This click re-measures a frame ALREADY in the image log, so it hits
-    # _nirc2_ask_duplicate_paused -- a modal QMessageBox.exec() that blocks
-    # forever headless (it is what timed CI out on 2026-07-28). Stub it the
-    # way gui_phase24 does, and assert it actually fired so the duplicate
-    # path stays covered rather than merely disarmed. clickedButton() is
-    # None under the stub, so the handler takes its declared default,
-    # "skip".
+    # This click re-measures a frame ALREADY in the image log. Until
+    # 2026-10-20 that raised _nirc2_ask_duplicate_paused, a modal
+    # QMessageBox.exec() (which blocks forever headless and, at the summit,
+    # paused night-time auto-measure runs). Duplicates are now appended
+    # without a question (DUPLICATE_POLICY): the stub below must NOT fire
+    # and the row must land in the image log.
     _dup_prompts = []
     _orig_exec = QtWidgets.QMessageBox.exec
     QtWidgets.QMessageBox.exec = lambda self: _dup_prompts.append(1) or 0
+    n_rows = len(win._n2_csv_rows)
     try:
         win._on_nirc2_click(ev)
     finally:
         QtWidgets.QMessageBox.exec = _orig_exec
-    assert _dup_prompts, \
-        "re-measuring a logged frame must raise the duplicate prompt"
+    assert not _dup_prompts, \
+        "a re-measured frame is appended to the log without a prompt"
+    assert len(win._n2_csv_rows) == n_rows + 1, "duplicate must be appended"
     n_after = len(win.n2_log.toPlainText().splitlines())
     assert n_after == n_before + 1, "click must append one measurement"
     s2 = float(win.n2_strehl_out.text())

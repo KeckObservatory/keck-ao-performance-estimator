@@ -13,6 +13,7 @@ import glob
 import os
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -59,6 +60,9 @@ def _looks_like_crash(returncode, stdout, stderr):
 def _run(script):
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # the measured-SR session journal must not land in the developer's
+    # ~/keck_ao_sr_logs
+    env.setdefault("KECK_AO_SR_LOG_DIR", tempfile.mkdtemp(prefix="sr_logs_"))
     # fieldsolve FS-OPEN-4: CI now runs on every push to the public repo
     # (fieldsolve P0-1), so hosted-runner slowness gets a real ceiling
     # instead of painting unrelated pushes red -- double the timeout

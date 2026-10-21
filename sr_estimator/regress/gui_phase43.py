@@ -93,6 +93,34 @@ def check_engine():
     print("  [ok] newest_frame (NIRC2 + OSIRIS names, n_unp_/.writing/"
           "spectrograph ignored), frame_ready rules")
 
+    # header gate (2026-10-20, k2aoserver-new): the NIRC2 writer fills the
+    # header in after the file has its final size, so a sized frame is
+    # not ready until its header parses and names the instrument
+    from astropy.io import fits
+    stub = os.path.join(d, "n0020.fits")
+    touch(stub, 5760)                       # final size, header still zeros
+    assert not fw.frame_header_ready(stub), "zero header is not ready"
+    t0 = time.time()
+    assert fw.wait_for_header(stub, timeout=0.3, poll_s=0.1) is None
+    assert 0.25 <= time.time() - t0 < 2.0, "wait_for_header honours timeout"
+    assert fw.wait_for_header(stub, timeout=5.0, poll_s=0.05,
+                              should_stop=lambda: True) is None
+    fits.PrimaryHDU(header=fits.Header({"INSTRUME": "NIRC2"})).writeto(
+        stub, overwrite=True)
+    assert fw.frame_header_ready(stub) and fw.frame_header_ready(stub, "nirc2")
+    assert not fw.frame_header_ready(stub, "osiris"), "kind is enforced"
+    assert fw.wait_for_header(stub, timeout=0.0)["INSTRUME"] == "NIRC2"
+    h = fits.Header()
+    assert not fw.header_identifies(h), "no identity at all"
+    h["CAMNAME"] = "narrow"
+    assert fw.header_identifies(h) and fw.header_identifies(h, "nirc2"), \
+        "older NIRC2 frames: CAMNAME without INSTRUME is accepted"
+    assert fw.header_identifies(fits.Header({"CURRINST": "OSIRIS"}), "osiris")
+    assert not fw.header_identifies(fits.Header({"INSTRUME": "GSAOI"}))
+    assert not fw.frame_header_ready(os.path.join(d, "notes.txt"))
+    print("  [ok] header gate: frame_header_ready / wait_for_header / "
+          "header_identifies (INSTRUME, CAMNAME-only, CURRINST, GSAOI, kind)")
+
     now = dt.datetime(2026, 9, 23, 6, 0, tzinfo=dt.timezone.utc)
     assert fw.night_dir_name(now) == "2026sep23"
     root = tempfile.mkdtemp(prefix="gui43_s_")

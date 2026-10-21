@@ -34,6 +34,13 @@ is measured. Remote polling is load on an operations server, so the GUI
 asks before starting it and flags it for as long as it runs (Eduardo
 2026-09-22).
 
+A frame at its final size is not necessarily finished: on k2aoserver-new
+the NIRC2 writer fills the header in AFTER the file has reached its size,
+so a frame can pass `frame_ready` while INSTRUME is still missing, and the
+tool then does not know the instrument and refuses it (Eduardo 2026-10-20,
+the deployed PyAO tool). `frame_header_ready` / `wait_for_header` make the
+instrument identity part of the readiness test.
+
 No Qt here -- the GUI calls this from worker threads (the /s disks are
 NFS hard mounts and rsync goes over ssh: a stall must not freeze the
 GUI; every rsync call carries a timeout).
@@ -43,11 +50,14 @@ import glob
 import os
 import re
 import subprocess
+import time
 
 __all__ = ["FRAME_PATTERNS", "NIRC2_DATA_DISKS", "FITS_BLOCK",
            "OSIRIS_REMOTE_HOST", "OSIRIS_REMOTE_DISK", "REMOTE_POLL_S",
+           "HEADER_WAIT_S", "HEADER_POLL_S",
            "is_frame_name", "nirc2_frame_number", "newest_frame",
-           "frame_ready", "night_dir_name", "find_latest_night_dir",
+           "frame_ready", "header_identifies", "frame_header_ready",
+           "wait_for_header", "night_dir_name", "find_latest_night_dir",
            "split_remote", "parse_rsync_listing", "remote_newest_frame",
            "remote_cache_dir", "remote_fetch", "prune_cache",
            "find_latest_osiris_night", "is_unp_frame"]
@@ -66,6 +76,9 @@ _REMOTE_RE = re.compile(r"^([A-Za-z0-9_.-]+):(/[A-Za-z0-9_./-]*)$")
 OSIRIS_REMOTE_HOST = "k2ao"             # read-only rsync key, vm-aodev only
 OSIRIS_REMOTE_DISK = "/s/sdata1100"
 REMOTE_POLL_S = 3.0     # one listing is ~0.6 s; 1 s polling is for local
+HEADER_WAIT_S = 20.0    # longest wait for a sized frame's header to name
+                        # the instrument before it is measured anyway
+HEADER_POLL_S = 0.5     # header re-read interval while waiting
 _RSYNC_SSH = "ssh -o BatchMode=yes -o ConnectTimeout=10"
 _REMOTE_KEEP = 20       # cached frames kept per remote directory
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun",
@@ -118,6 +131,55 @@ def frame_ready(size, previous_size):
     still being written over NFS fails one or the other."""
     return (size > 0 and size % FITS_BLOCK == 0
             and previous_size is not None and size == previous_size)
+
+
+def header_identifies(header, kind=None):
+    """True when a primary `header` names an instrument the tool measures:
+    NIRC2 by INSTRUME (or, on older frames that lack it, by the CAMNAME
+    card), OSIRIS by CURRINST / INSTRUME. `kind` ("nirc2" / "osiris")
+    restricts it to that instrument; None accepts either. This is the
+    same acceptance rule the measurement workers apply, so a header that
+    passes here is one they will measure."""
+    from .osiris import detect_instrument
+    inst = detect_instrument(header)
+    if (inst == "" and str(header.get("INSTRUME", "") or "") == ""
+            and header.get("CAMNAME") is not None):
+        inst = "nirc2"
+    return inst != "" and (kind is None or inst == kind)
+
+
+def frame_header_ready(path, kind=None):
+    """True once the primary header of `path` parses through its END card
+    and header_identifies() it; False while the header is still being
+    written (no END card yet, or an instrument-less stub), or when the
+    file cannot be read as FITS at all."""
+    from astropy.io import fits
+    try:
+        header = fits.getheader(path)
+    except Exception:
+        return False
+    return header_identifies(header, kind)
+
+
+def wait_for_header(path, kind=None, timeout=HEADER_WAIT_S,
+                    poll_s=HEADER_POLL_S, should_stop=None):
+    """Re-read the primary header of `path` every `poll_s` seconds until it
+    identifies the instrument (header_identifies), for at most `timeout`
+    seconds. Returns the header, or None when time ran out or
+    `should_stop()` turned true. For worker threads: blocks the caller."""
+    from astropy.io import fits
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        try:
+            header = fits.getheader(path)
+            if header_identifies(header, kind):
+                return header
+        except Exception:
+            pass
+        left = deadline - time.monotonic()
+        if left <= 0.0 or (should_stop is not None and should_stop()):
+            return None
+        time.sleep(min(poll_s, left))
 
 
 def night_dir_name(date):

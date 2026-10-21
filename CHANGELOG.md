@@ -3,6 +3,38 @@
 All notable changes to the Keck AO Performance Estimator. The project
 is released on GitHub only (pin `@v1.5.0` in the install URL).
 
+## Unreleased
+
+Summit hotfixes from the first nights of the deployed PyAO `strehl_tool`
+(Eduardo 2026-10-20, k2aoserver-new); mirrored here so the two tools stay in
+sync.
+
+### Fixed
+- **Auto-measure measured a frame before its header was written.** The NIRC2
+  writer gives the file its final size first and fills the header in after,
+  so `frame_ready` (whole FITS blocks, size stable) passed while INSTRUME was
+  still missing; the tool then did not know the instrument and refused the
+  frame. The watcher now also requires `frame_watch.frame_header_ready` (the
+  header parses to END and names NIRC2 / OSIRIS) and re-checks every poll;
+  after `HEADER_WAIT_S` (20 s) it measures anyway so the refusal shows in the
+  log. The measure worker waits the same way when GO! lands on a frame whose
+  header has no identity yet (`wait_for_header`).
+
+### Changed
+- **Duplicates are always appended.** Re-measuring a frame/star already in
+  the image log no longer opens the Append / Overwrite / Don't add question
+  (which also paused auto-measure runs): `DUPLICATE_POLICY = "append"`.
+- **Robust sky (σ-clip) is on by default** (GUI default and the config
+  fallback). Untick it for the IDL tool's byte-faithful plain-mean sky.
+
+### Added
+- **Session journal** (`session_log.py`, synced to PyAO): every logged
+  measurement is appended as it happens to
+  `$KECK_AO_SR_LOG_DIR/sr_tool_<UT date>.csv` (default `~/keck_ao_sr_logs`),
+  same columns and rounding as Export CSV, header written once; on close the
+  text log is appended to `sr_tool_<UT date>.log`. The journal is
+  append-only: rows deleted in the table stay in the file.
+
 ## 1.5.0 — 2026-10-13
 
 ### Added

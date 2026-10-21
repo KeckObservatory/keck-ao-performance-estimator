@@ -39,19 +39,26 @@ Plot tabs show the **Timeline**, the **Field map**, the **Error terms**, the
 setting and re-run it directly); it measures the numbered FIRST IMAGE / N
 IMAGES sequence when nothing is loaded, or as soon as you touch either spin.
 
+Every logged measurement is also appended, as it happens, to tonight's
+**session journal** `$KECK_AO_SR_LOG_DIR/sr_tool_<UT date>.csv` (default
+`~/keck_ao_sr_logs`; the path is the first line of the log), with Export CSV's
+columns and rounding; the text log is appended to `sr_tool_<UT date>.log` when
+the window closes. The journal is append-only — rows deleted in the image-log
+table stay in the file — and a re-measured frame is appended, not questioned.
+
 Load a frame and the tool measures the brightest star, or "Measure field" to
 find and measure the N brightest and plot Strehl (or FWHM) against field
 position — the observational twin of the Field-map tab's model map. Stars that
 are saturated, measure outside a physical Strehl of (0, 1], or have a broken
 radial profile are rejected with a per-star reason in the log.
 
-With the default settings the numbers are byte-identical to the summit IDL
-widget. Three opt-in mitigations handle crowded fields, each logged whenever it
-changes anything:
+With **Robust sky** unticked and the other mitigations off, the numbers are
+byte-identical to the summit IDL widget. Three mitigations handle crowded
+fields, each logged whenever it changes anything:
 
-- **Robust sky (σ-clip)** and **Pick sky** — replace the annulus mean sky, which
-  a neighbour in the annulus drags high (this is how a dense field yields
-  nonsense or negative Strehl).
+- **Robust sky (σ-clip)** (on by default since 2026-10-20) and **Pick sky** —
+  replace the annulus mean sky, which a neighbour in the annulus drags high
+  (this is how a dense field yields nonsense or negative Strehl).
 - **PSF-fit neighbour subtraction** (**"Measure field" only**) — for the case
   those two cannot reach, a neighbour *inside* the photometry aperture. The frame's own empirical PSF is
   built from its isolated stars and fitted simultaneously to the target and its

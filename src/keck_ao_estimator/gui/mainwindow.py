@@ -78,6 +78,11 @@ class _CloseStopsThreads:
     2026-10-06; the two tools are kept in sync)."""
 
     def closeEvent(self, event):
+        # the measured-SR text log goes to tonight's session file first
+        # (Eduardo 2026-10-20: save the log when the tool is closed)
+        save_log = getattr(self, "_nirc2_save_session_log", None)
+        if callable(save_log):
+            save_log()
         for t in self.findChildren(QtCore.QThread):
             if not t.isRunning():
                 continue
@@ -1338,7 +1343,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             self.n2_bg1.setValue(int(n2.get("bg1", 2)))
             self.n2_nbg.setValue(int(n2.get("nbg", 0)))
             self.n2_autofind.setChecked(bool(n2.get("autofind", True)))
-            self.n2_robust_sky.setChecked(bool(n2.get("robust_sky", False)))
+            self.n2_robust_sky.setChecked(bool(n2.get("robust_sky", True)))
             self.n2_idl_version.setCurrentText(str(n2.get(
                 "idl_version", engine.SR_TOOL_IDL_DEFAULT)))
             self.n2_auto_rad.setChecked(bool(n2.get("auto_radius", False)))

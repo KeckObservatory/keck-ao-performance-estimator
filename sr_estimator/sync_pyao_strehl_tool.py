@@ -34,6 +34,7 @@ ENGINE_MODULES = (
     "image_strehl.py", "nirc2.py", "nirc2_psf.py", "osiris.py", "epsf.py",
     "psf_fit.py", "field_solve.py", "field_stats.py", "ee_correction.py",
     "parallel.py", "frame_watch.py", "keck_network.py", "series_stats.py",
+    "session_log.py",
 )
 DATA_FILES = ("supermask.fits.gz",)
 VENDOR_DIR = os.path.join("kaotools", "strehl_tool", "_vendored_estimator")

@@ -252,6 +252,8 @@ class Nirc2MeasureWorker(QThread):
         import numpy as np
         from astropy.io import fits
 
+        from ..frame_watch import (HEADER_WAIT_S, header_identifies,
+                                   wait_for_header)
         from ..image_strehl import (find_stars, load_nirc2_calibration,
                                     measure_strehl, osiris_reduce,
                                     reduce_frame)
@@ -299,21 +301,33 @@ class Nirc2MeasureWorker(QThread):
                 break
             reduced = params = header = key = None
             try:
+                header = fits.getheader(fpath)
+                if not header_identifies(header) and \
+                        str(header.get("INSTRUME", "") or "") == "":
+                    # no identity at all: the summit writer fills the
+                    # header in after the file has its size (frame_watch),
+                    # so give it HEADER_WAIT_S to name the instrument
+                    self.frame_failed.emit(
+                        no, "header does not name the instrument yet -- "
+                            f"waiting up to {HEADER_WAIT_S:.0f} s for it")
+                    waited = wait_for_header(
+                        fpath, should_stop=lambda: self._aborted)
+                    if waited is not None:
+                        header = waited
+                # NIRC2 and OSIRIS route to their own pipelines; an
+                # explicit other INSTRUME (GSAOI, ...) is refused by
+                # name; a header with neither identity is accepted as
+                # NIRC2 only when the CAMNAME card is present
+                inst = detect_instrument(header)
+                instrume = str(header.get("INSTRUME", "")).upper()
+                if (inst == ""
+                        and not (instrume == ""
+                                 and header.get("CAMNAME") is not None)):
+                    self.frame_failed.emit(
+                        no, f"{instrume or 'unknown instrument'}: only "
+                            "NIRC2 and OSIRIS frames are supported")
+                    continue
                 with fits.open(fpath) as hdul:
-                    header = hdul[0].header
-                    # NIRC2 and OSIRIS route to their own pipelines; an
-                    # explicit other INSTRUME (GSAOI, ...) is refused by
-                    # name; a header with neither identity is accepted as
-                    # NIRC2 only when the CAMNAME card is present
-                    inst = detect_instrument(header)
-                    instrume = str(header.get("INSTRUME", "")).upper()
-                    if (inst == ""
-                            and not (instrume == ""
-                                     and header.get("CAMNAME") is not None)):
-                        self.frame_failed.emit(
-                            no, f"{instrume or 'unknown instrument'}: only "
-                                "NIRC2 and OSIRIS frames are supported")
-                        continue
                     raw = np.asarray(hdul[0].data, dtype=float)
                 if inst == "osiris":
                     params = osiris_frame_params(header)
@@ -401,10 +415,14 @@ class FrameWatchWorker(QThread):
     """The IDL Strehl tool's autoimage timer: polls a frame directory and
     emits new_frame(local_path) once the last frame of instrument `kind`
     ("nirc2": n####.fits, "osiris": i<YYMMDD>_a######.fits) by name is
-    complete (frame_watch.frame_ready: whole FITS blocks, size unchanged
-    since the previous poll). The first complete frame seen is emitted
-    too -- the IDL tool also measures the current last image as soon as
-    autoimage is switched on.
+    complete: frame_watch.frame_ready (whole FITS blocks, size unchanged
+    since the previous poll) AND frame_watch.frame_header_ready (the
+    header parses and names the instrument -- the summit NIRC2 writer
+    fills it in after the file has its size). A frame whose header has
+    not named the instrument after frame_watch.HEADER_WAIT_S is emitted
+    anyway, with a status message, so the refusal shows in the log. The
+    first complete frame seen is emitted too -- the IDL tool also
+    measures the current last image as soon as autoimage is switched on.
 
     A local PATH is polled every `interval_s`. A REMOTE one
     (``host:/abs/dir``, frame_watch.split_remote) is listed with rsync
@@ -436,17 +454,22 @@ class FrameWatchWorker(QThread):
         self._stop = True
 
     def run(self):
-        from ..frame_watch import (REMOTE_POLL_S, frame_ready, newest_frame,
-                                   prune_cache, remote_cache_dir,
-                                   remote_fetch, remote_newest_frame,
-                                   split_remote)
+        import time
+
+        from ..frame_watch import (HEADER_WAIT_S, REMOTE_POLL_S,
+                                   frame_header_ready, frame_ready,
+                                   newest_frame, prune_cache,
+                                   remote_cache_dir, remote_fetch,
+                                   remote_newest_frame, split_remote)
 
         watched, emitted, pending, error = None, None, None, None
+        header_wait = None      # (name, first time seen sized but headerless)
         while not self._stop:
             with self._lock:
                 path = self._path
             if path != watched:
                 watched, emitted, pending, error = path, None, None, None
+                header_wait = None
             remote = split_remote(path)
             nf = None
             try:
@@ -472,9 +495,25 @@ class FrameWatchWorker(QThread):
                             cache = remote_cache_dir(*remote)
                             full = remote_fetch(remote[0], full, cache)
                             prune_cache(cache)
-                        emitted, pending = name, None
-                        if not self._stop:
-                            self.new_frame.emit(full)
+                        ready = frame_header_ready(full, self.kind)
+                        if not ready:
+                            # sized but not yet identifiable: keep it
+                            # pending (re-checked next poll) until the
+                            # header names the instrument or the wait
+                            # runs out
+                            if header_wait is None or header_wait[0] != name:
+                                header_wait = (name, time.monotonic())
+                            if time.monotonic() - header_wait[1] >= HEADER_WAIT_S:
+                                self.status.emit(
+                                    f"{name}: header still does not name "
+                                    f"the instrument after "
+                                    f"{HEADER_WAIT_S:.0f} s -- measuring "
+                                    "anyway")
+                                ready = True
+                        if ready:
+                            emitted, pending, header_wait = name, None, None
+                            if not self._stop:
+                                self.new_frame.emit(full)
                     except OSError as e:     # retried on the next poll
                         self.status.emit(
                             f"rsync copy of {name} failed: {e} -- retrying")
