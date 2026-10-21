@@ -156,18 +156,24 @@ class Nirc2StrehlTabMixin:
         # NIRC2 and OSIRIS can both be in use on one night: the choice
         # sets which frames auto-measure looks for, where Latest searches,
         # and which PATH is shown (each instrument remembers its own)
+        # the menu lists the instrument parameter files (instruments.py:
+        # NIRC2, OSIRIS, plus any in $KECK_AO_INSTRUMENTS)
+        from ...instruments import load_errors, registry
+        _insts = list(registry().values())
         self.n2_instrument = QtWidgets.QComboBox()
-        self.n2_instrument.addItems(["NIRC2", "OSIRIS"])
+        self.n2_instrument.addItems([i.name for i in _insts])
         self.n2_instrument.setToolTip(
             "Which instrument's frames to look for. Auto-measure only "
-            "picks up this instrument's frames (NIRC2 n####.fits, OSIRIS "
-            "imager i<YYMMDD>_a######.fits) and Latest searches its "
-            "disks. PATH is remembered per instrument, so switching "
-            "flips between tonight's NIRC2 and OSIRIS directories. "
-            "Switching stops Auto-measure (switch it on again for the "
-            "other instrument).")
-        self._n2_inst_paths = {"NIRC2": "", "OSIRIS": ""}
-        self._n2_inst_current = "NIRC2"
+            "picks up this instrument's frames (its parameter file's "
+            "file-name pattern) and Latest searches its disks. PATH is "
+            "remembered per instrument, so switching flips between "
+            "tonight's directories. Switching stops Auto-measure (switch "
+            "it on again for the other instrument). Add an instrument with "
+            "a parameter file in $KECK_AO_INSTRUMENTS "
+            "(data/instruments/TEMPLATE.yaml.example).")
+        self._n2_inst_paths = {i.name: "" for i in _insts}
+        self._n2_inst_current = _insts[0].name
+        self._n2_instrument_errors = load_errors()
         self.n2_instrument.currentTextChanged.connect(
             self._on_nirc2_instrument)
         # a spanning row: in the field column (beside the form's widest
@@ -190,7 +196,7 @@ class Nirc2StrehlTabMixin:
             "Numbered-frame prefix: NIRC2 'n' (n0007.fits), OSIRIS e.g. "
             "'i260723_a' (i260723_a003002.fits, 6 digits). Remembered per "
             "instrument; for OSIRIS it fills in from the frames in PATH.")
-        self._n2_inst_prefixes = {"NIRC2": "n", "OSIRIS": ""}
+        self._n2_inst_prefixes = {i.name: i.default_prefix for i in _insts}
         im1_row = QtWidgets.QHBoxLayout()
         im1_row.setContentsMargins(0, 0, 0, 0)
         im1_row.addWidget(self.n2_im1)
@@ -829,6 +835,8 @@ class Nirc2StrehlTabMixin:
             f"session journal: {self._nirc2_session_paths()[0]} (every "
             "logged measurement is appended; on close you are asked whether "
             "to save the text log)")
+        for err in self._n2_instrument_errors:
+            self.n2_log.appendPlainText(f"! instrument file skipped: {err}")
         # last TT-star catalogue ring match, tagged with the frame it was
         # run for (see _on_nirc2_tt_star_catalog / _nirc2_resolve_guide_star)
         self._n2_tt_star_resolved = None
@@ -894,16 +902,16 @@ class Nirc2StrehlTabMixin:
                            if n.lower().endswith((".fits", ".fits.gz")))
         except OSError:
             return
-        if self._nirc2_kind() == "nirc2":
-            from ...frame_watch import is_unp_frame
-            names = [n for n in names if not is_unp_frame(n)]
-        elif not self.n2_prefix.text().strip():
-            # OSIRIS: take the numbered prefix (i<YYMMDD>_a) from the frames
-            import re
+        inst = self._nirc2_inst()
+        # files the instrument skips (NIRC2's _unp copies) are not listed
+        names = [n for n in names if not inst.is_skipped(n)]
+        if not self.n2_prefix.text().strip():
+            # an empty PREFIX (OSIRIS: i<YYMMDD>_a) is filled in from the
+            # frames: the name up to the frame-number group
             for n in names:
-                m = re.match(r"^(i\d{6}_a)\d{6}\.fits$", n)
-                if m is not None:
-                    self.n2_prefix.setText(m.group(1))
+                m = inst.frame_regex.match(n)
+                if m is not None and m.groups() and m.group(1) is not None:
+                    self.n2_prefix.setText(n[:m.start(1)])
                     break
         for name in names:
             item = QtWidgets.QListWidgetItem(name)
@@ -974,12 +982,18 @@ class Nirc2StrehlTabMixin:
             return None
         return (float(az), float(el))
 
+    def _nirc2_inst(self):
+        """The selected instrument's parameter file (instruments.Instrument)."""
+        from ...instruments import get
+        return get(self.n2_instrument.currentText())
+
     def _nirc2_kind(self):
-        return self.n2_instrument.currentText().lower()   # nirc2 / osiris
+        return self._nirc2_inst().key          # "nirc2", "osiris", ...
 
     def _nirc2_digits(self):
-        """Frame-number width: NIRC2 n0007 (4), OSIRIS i260723_a003002 (6)."""
-        return 6 if self._nirc2_kind() == "osiris" else 4
+        """Frame-number width from the parameter file: NIRC2 n0007 (4),
+        OSIRIS i260723_a003002 (6)."""
+        return self._nirc2_inst().digits
 
     def _nirc2_numbered_name(self, no):
         """The numbered frame's file stem, <PREFIX><number>."""
@@ -990,8 +1004,9 @@ class Nirc2StrehlTabMixin:
         self._n2_inst_paths[old] = self.n2_path.text()
         self._n2_inst_prefixes[old] = self.n2_prefix.text()
         self._n2_inst_current = text
+        from ...instruments import get
         self.n2_prefix.setText(self._n2_inst_prefixes.get(
-            text, "n" if text == "NIRC2" else ""))
+            text, get(text).default_prefix))
         if self.n2_watch.isChecked():
             self.n2_watch.setChecked(False)     # never carry polling over
         self.n2_path.setText(self._n2_inst_paths.get(text, ""))
@@ -1002,9 +1017,12 @@ class Nirc2StrehlTabMixin:
         self.n2_latest.setEnabled(False)
         self.n2_instrument.setEnabled(False)   # the answer is for this one
         self.n2_log.appendPlainText(
-            "searching k2ao:/s/sdata1100 for tonight's OSIRIS directory "
-            "(one-off rsync listing, 2-20 s) ..." if kind == "osiris" else
-            "searching the /s NIRC2 disks for tonight's directory ...")
+            "searching /s/sdata1100 (directly if mounted, else a one-off rsync "
+            "listing via k2ao, 2-20 s) for tonight's OSIRIS directory ..."
+            if kind == "osiris" else
+            "searching the /s NIRC2 disks for tonight's directory ..."
+            if kind == "nirc2" else
+            f"searching for tonight's {self._nirc2_inst().name} directory ...")
         self._n2_latest_worker = LatestNightWorker(kind, parent=self)
         self._n2_latest_worker.done.connect(self._on_nirc2_latest_done)
         self._n2_latest_worker.start()
@@ -1017,11 +1035,15 @@ class Nirc2StrehlTabMixin:
             self.n2_log.appendPlainText(f"! Latest ({inst}) failed: {error}")
             return
         if not path:
+            kind = self._nirc2_kind()
             self.n2_log.appendPlainText(
                 "! no NIRC2 night directory found under /s/sdata900-907 "
-                "(disks not mounted on this machine?)" if inst == "NIRC2"
+                "(disks not mounted on this machine?)" if kind == "nirc2"
                 else "! no OSIRIS night directory found on /s/sdata1100 "
-                     "(mounted here, else over rsync via k2ao)")
+                     "(mounted here, else over rsync via k2ao)"
+                if kind == "osiris" else
+                f"! no {inst} night directory found (its parameter file's "
+                f"night section: {self._nirc2_inst().source})")
             return
         self.n2_path.setText(path)
         self.n2_log.appendPlainText(
@@ -1223,7 +1245,6 @@ class Nirc2StrehlTabMixin:
         called on arrival and again whenever a measurement or a field run
         ends."""
         import os
-        from ...frame_watch import nirc2_frame_number
         fpath = getattr(self, "_n2_watch_pending", None)
         if (fpath is None or getattr(self, "_n2_watcher", None) is None
                 or self._nirc2_watch_busy()):
@@ -1231,12 +1252,19 @@ class Nirc2StrehlTabMixin:
         self._n2_watch_pending = None
         name = os.path.basename(fpath)
         self.n2_log.appendPlainText(f"auto-measure: new frame {name}")
-        no = nirc2_frame_number(name)
-        if no is not None:      # summit-numbered: drive FIRST IMAGE, as
-            self.n2_im1.setValue(no)        # a double-click does
+        inst = self._nirc2_inst()
+        no = inst.frame_number(name)
+        if inst.default_prefix and no is not None and name == \
+                inst.frame_name(self.n2_prefix.text().strip(), no) and \
+                os.path.dirname(fpath) == os.path.normpath(
+                    self._nirc2_frames_dir()):
+            # a numbered frame of PATH/PREFIX of an instrument whose file
+            # sets a PREFIX (NIRC2 n): drive FIRST IMAGE, as a double-click
+            # does; OSIRIS frames are measured by file name, as before
+            self.n2_im1.setValue(no)
             self.n2_nim.setValue(1)
             self._nirc2_start()
-        else:                   # OSIRIS imager: measure this one file
+        else:                   # measure this one file
             self._nirc2_start(files=[(os.path.splitext(name)[0], fpath)])
 
     def _nirc2_radii(self):
@@ -3728,9 +3756,11 @@ class Nirc2StrehlTabMixin:
             except Exception:
                 continue     # the real run will report this properly
             try:
-                inst = engine.detect_instrument(header)
-                p = (engine.osiris_frame_params(header) if inst == "osiris"
-                    else engine.nirc2_frame_params(header))
+                from ...instruments import identify
+                inst = identify(header)
+                if inst is None:
+                    continue
+                p = inst.frame_params(header)
             except Exception:
                 continue
             name = (p.object_name or "").strip()

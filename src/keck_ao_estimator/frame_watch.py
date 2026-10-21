@@ -9,7 +9,8 @@ keyword libraries are not installed off the summit hosts (``show -s nirc2
 outdir`` fails on vm-aodev), so tonight's directory is found from the
 filesystem instead.
 
-Frame naming, one pattern per instrument:
+Frame naming, one pattern per instrument, read from the instrument
+parameter files (instruments.py; data/instruments/*.yaml):
   * NIRC2: ``n0001.fits`` .. ``n9999.fits``. Written as ``n0017.fits.
     writing`` and renamed when complete; the ``n_unp_NNNN.fits``
     unprocessed copies (up to 134 MB) never match.
@@ -52,7 +53,7 @@ import re
 import subprocess
 import time
 
-__all__ = ["FRAME_PATTERNS", "NIRC2_DATA_DISKS", "FITS_BLOCK",
+__all__ = ["frame_patterns", "NIRC2_DATA_DISKS", "FITS_BLOCK",
            "OSIRIS_REMOTE_HOST", "OSIRIS_REMOTE_DISK", "REMOTE_POLL_S",
            "HEADER_WAIT_S", "HEADER_POLL_S",
            "is_frame_name", "nirc2_frame_number", "newest_frame",
@@ -63,10 +64,12 @@ __all__ = ["FRAME_PATTERNS", "NIRC2_DATA_DISKS", "FITS_BLOCK",
            "find_latest_osiris_night", "find_latest_osiris_night_local",
            "is_unp_frame"]
 
-FRAME_PATTERNS = {
-    "nirc2": re.compile(r"^n(\d{4})\.fits$"),
-    "osiris": re.compile(r"^i\d{6}_a\d{6}\.fits$"),
-}
+def frame_patterns():
+    """{instrument key: compiled file-name regex}, from the instrument
+    parameter files (instruments.py): an instrument added with a file is
+    watched like NIRC2 and OSIRIS."""
+    from .instruments import registry
+    return {key: inst.frame_regex for key, inst in registry().items()}
 NIRC2_DATA_DISKS = tuple(f"/s/sdata{n}" for n in range(900, 908))
 FITS_BLOCK = 2880       # a complete FITS file is a whole number of blocks
 _NIGHT_RE = re.compile(r"^(\d{4})([a-z]{3})(\d{2})(?:_\w+)?$")
@@ -97,15 +100,16 @@ def is_unp_frame(name):
 def is_frame_name(name, kind=None):
     """`name` is a frame of instrument `kind` ("nirc2" / "osiris"), or of
     either when kind is None."""
+    from .instruments import registry
     if kind is not None:
-        return FRAME_PATTERNS[kind].match(name) is not None
-    return any(p.match(name) for p in FRAME_PATTERNS.values())
+        return registry()[kind].is_frame(name)
+    return any(i.is_frame(name) for i in registry().values())
 
 
 def nirc2_frame_number(name):
     """The frame number of a summit-numbered NIRC2 name, else None."""
-    m = FRAME_PATTERNS["nirc2"].match(name)
-    return int(m.group(1)) if m else None
+    from .instruments import registry
+    return registry()["nirc2"].frame_number(name)
 
 
 def newest_frame(dirpath, kind=None):
@@ -135,18 +139,15 @@ def frame_ready(size, previous_size):
 
 
 def header_identifies(header, kind=None):
-    """True when a primary `header` names an instrument the tool measures:
-    NIRC2 by INSTRUME (or, on older frames that lack it, by the CAMNAME
-    card), OSIRIS by CURRINST / INSTRUME. `kind` ("nirc2" / "osiris")
-    restricts it to that instrument; None accepts either. This is the
-    same acceptance rule the measurement workers apply, so a header that
-    passes here is one they will measure."""
-    from .osiris import detect_instrument
-    inst = detect_instrument(header)
-    if (inst == "" and str(header.get("INSTRUME", "") or "") == ""
-            and header.get("CAMNAME") is not None):
-        inst = "nirc2"
-    return inst != "" and (kind is None or inst == kind)
+    """True when a primary `header` matches an instrument parameter file's
+    identify rules (instruments.identify: NIRC2 by INSTRUME, or CAMNAME
+    without INSTRUME on older frames; OSIRIS by CURRINST / INSTRUME; any
+    added instrument by its own rules). `kind` restricts it to that
+    instrument; None accepts any. The measurement workers apply the same
+    rule, so a header that passes here is one they will measure."""
+    from .instruments import identify
+    inst = identify(header)
+    return inst is not None and (kind is None or inst.key == kind)
 
 
 def frame_header_ready(path, kind=None):

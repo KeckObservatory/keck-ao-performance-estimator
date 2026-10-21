@@ -1,0 +1,64 @@
+# Template for a new instrument. Copy it to <name>.yaml in a directory
+# listed in $KECK_AO_INSTRUMENTS (several directories: separate them with
+# ':'), fill it in, and restart the tool: the instrument appears in the
+# Instrument menu. A file that does not load is reported in the tool's log.
+#
+# Validate a new instrument on one frame of known Strehl (or a calibration
+# source image) before trusting its numbers: a wrong plate scale, pupil or
+# wavelength gives a plausible-looking but wrong Strehl.
+
+key: myinst                     # lowercase id, unique
+name: MYINST                    # shown in the Instrument menu
+telescope: My 8 m telescope
+order: 100                      # menu position (NIRC2 10, OSIRIS 20)
+description: One line about the instrument.
+
+identify:                       # any rule matching = this instrument
+  - {keyword: INSTRUME, contains: MYINST}     # case-insensitive substring
+  # - {keyword: CAMERA, present: true, unless: [INSTRUME]}
+
+frames:
+  pattern: '^img(\d{5})\.fits$' # regex on the file name; group 1 = number
+  digits: 5                     # zero padding of the number (FIRST IMAGE)
+  prefix: img                   # default PREFIX
+  # skip: '_raw\.'              # names that match pattern but are not frames
+  # skip_reason: raw copy ignored  # what the log says about them
+
+night:                          # the Latest button
+  model: directories            # or: none
+  roots: ['/data/myinst/*']     # directories holding the night directories
+  name_format: '%Y%m%d'         # night directory name (strftime codes)
+  subdir: raw                   # frames are in <night>/<subdir>
+
+params:
+  model: generic
+  plate_scale_mas: 20.0         # or plate_scale_keyword: PIXSCALE
+  # plate_scale_keyword_scale: 1000.0   # header value * this = mas/pixel
+  wavelength:
+    keyword: WAVELEN            # effective wavelength in the header ...
+    keyword_scale: 1.0          # ... header value * this = microns
+    filter_keyword: FILTER      # else looked up by filter name
+    filters: {K: 2.20, Ks: 2.15, H: 1.63, J: 1.25}
+    default_um: 2.2             # else this (remove it to refuse the frame)
+  coadds_keyword: COADDS        # counts are divided by this for saturation
+  saturation_adu: 30000         # per coadd; remove for no saturation check
+  pupil_rotation_deg: 0.0       # pupil angle on the detector ...
+  # pupil_rotation_keyword: PUPANGLE   # ... plus sign * this header value
+  # pupil_rotation_sign: 1.0
+  date_keyword: DATE-OBS        # ISO date (or date + 'T' + time)
+  time_keyword: UTC
+  object_keyword: OBJECT
+
+reduce:
+  model: generic
+  flat: myinst_flat.fits        # optional; relative to this file
+  flat_floor: 0.2               # flat values below this are raised to it
+  bad_pixel_mask: myinst_mask.fits   # optional; nonzero = bad pixel
+  fix_image: false              # true: sigma-filter hot pixels / cosmics
+  backgrounds: true             # allow numbered background frames
+
+pupil:
+  model: circular
+  diameter_m: 8.0               # primary diameter
+  obscuration_m: 1.2            # central obscuration diameter (0 = none)
+  spiders: {count: 4, width_m: 0.05, angle_deg: 45.0}

@@ -46,6 +46,14 @@ columns and rounding; the text log is appended to `sr_tool_<UT date>.log` when
 the window closes. The journal is append-only — rows deleted in the image-log
 table stay in the file — and a re-measured frame is appended, not questioned.
 
+**Instruments** come from parameter files: NIRC2 and OSIRIS ship with the
+package, and any `*.yaml` in a directory named by `$KECK_AO_INSTRUMENTS` is
+added to the Instrument menu (copy `data/instruments/TEMPLATE.yaml.example`).
+A file gives the header identity, frame names, where Latest looks, the plate
+scale and filter table, the reduction and the telescope pupil (circular with
+obscuration and spiders). Validate a new instrument on a frame of known
+Strehl before trusting it.
+
 Load a frame and the tool measures the brightest star, or "Measure field" to
 find and measure the N brightest and plot Strehl (or FWHM) against field
 position — the observational twin of the Field-map tab's model map. Stars that

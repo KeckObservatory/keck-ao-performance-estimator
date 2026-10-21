@@ -25,6 +25,30 @@ sync.
   local PATH is returned (`find_latest_osiris_night_local`); rsync stays the
   fallback elsewhere.
 
+### Fixed (2026-10-21)
+- **OSIRIS with background frames set forced the sky to 0.** OSIRIS
+  backgrounds are not subtracted in the GUI (logged), but the worker still
+  told the measurement they were (`background_subtracted=True`), so the
+  annulus sky was skipped and the pedestal stayed in the star's flux. The
+  sky is now measured in the annulus whenever no background was subtracted.
+  Frames measured with no background frames set (the usual case, and every
+  golden frame) are unchanged.
+
+### Added (2026-10-21)
+- **Instrument parameter files** (`instruments.py`, `pupil_psf.py`,
+  `data/instruments/*.yaml`, synced to PyAO). Each instrument is one YAML file:
+  header identity, frame names, where Latest looks, header-to-parameter
+  mapping (plate scale, filter table, coadds, saturation, pupil rotation),
+  reduction (flat, bad-pixel mask) and the telescope pupil. NIRC2 and OSIRIS
+  are the first two files and keep their own code paths: on the 9 golden
+  frames the measurement worker gives bit-identical results to before
+  (both IDL versions, robust sky on and off). A new instrument uses the
+  generic models, including a circular pupil with central obscuration and
+  spiders. Files in `$KECK_AO_INSTRUMENTS` are added to the Measured SR
+  menu; a file that does not load is named in the log.
+  `data/instruments/TEMPLATE.yaml.example` documents every field.
+  New dependency: PyYAML.
+
 ### Changed
 - **Duplicates are always appended.** Re-measuring a frame/star already in
   the image log no longer opens the Append / Overwrite / Don't add question

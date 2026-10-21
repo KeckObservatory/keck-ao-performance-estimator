@@ -254,24 +254,13 @@ class Nirc2MeasureWorker(QThread):
 
         from ..frame_watch import (HEADER_WAIT_S, header_identifies,
                                    wait_for_header)
-        from ..image_strehl import (find_stars, load_nirc2_calibration,
-                                    measure_strehl, osiris_reduce,
-                                    reduce_frame)
-        from ..nirc2 import nirc2_frame_params
-        from ..nirc2_psf import nirc2_dl_psf
-        from ..osiris import detect_instrument, osiris_frame_params
+        from ..image_strehl import _failed, find_stars, measure_strehl
+        from ..instruments import FramePrep, identify, names
 
-        # a missing calibration no longer stops the run: NIRC2 frames are
-        # then reduced without flat / bad-pixel mask and SHOWN, but not
-        # measured (Eduardo 2026-10-06; in sync with PyAO's strehl_tool)
-        cal_error = None
-        try:
-            flat, mask = load_nirc2_calibration()
-        except Exception as e:
-            flat = mask = None
-            cal_error = f"calibration unavailable ({type(e).__name__}: {e})"
-            self.frame_failed.emit(self.im1, cal_error + " -- frames are "
-                                   "shown but not measured")
+        # per-instrument calibration, loaded once; a missing one no longer
+        # stops the run: frames are then shown but not measured (Eduardo
+        # 2026-10-06; in sync with PyAO's strehl_tool)
+        prep = FramePrep()
 
         background = None
         if self.nbg > 0:
@@ -288,7 +277,6 @@ class Nirc2MeasureWorker(QThread):
                 background = np.mean(bgs, axis=0)
 
         photrad, bgin, bgout, peakrad = self.radii
-        dl_cache = {}
         seq = (self.files if self.files is not None else
                [(str(no), self._fname(no))
                 for no in range(self.im1, self.im1 + self.nim)])
@@ -299,7 +287,7 @@ class Nirc2MeasureWorker(QThread):
             # the dialog
             if not self._wait_if_paused():
                 break
-            reduced = params = header = key = None
+            reduced = params = header = dl = None
             try:
                 header = fits.getheader(fpath)
                 if not header_identifies(header) and \
@@ -314,57 +302,47 @@ class Nirc2MeasureWorker(QThread):
                         fpath, should_stop=lambda: self._aborted)
                     if waited is not None:
                         header = waited
-                # NIRC2 and OSIRIS route to their own pipelines; an
-                # explicit other INSTRUME (GSAOI, ...) is refused by
-                # name; a header with neither identity is accepted as
-                # NIRC2 only when the CAMNAME card is present
-                inst = detect_instrument(header)
-                instrume = str(header.get("INSTRUME", "")).upper()
-                if (inst == ""
-                        and not (instrume == ""
-                                 and header.get("CAMNAME") is not None)):
+                # the instrument parameter files (instruments.py) decide:
+                # NIRC2 and OSIRIS keep their own pipelines; any other
+                # instrument needs a file whose identify rules match
+                inst = identify(header)
+                if inst is None:
+                    instrume = str(header.get("INSTRUME", "")).upper()
                     self.frame_failed.emit(
-                        no, f"{instrume or 'unknown instrument'}: only "
-                            "NIRC2 and OSIRIS frames are supported")
+                        no, f"{instrume or 'unknown instrument'}: not a "
+                            f"known instrument (known: {', '.join(names())};"
+                            " add one with a parameter file)")
                     continue
                 with fits.open(fpath) as hdul:
                     raw = np.asarray(hdul[0].data, dtype=float)
-                if inst == "osiris":
-                    params = osiris_frame_params(header)
-                    if background is not None:
-                        # numbered n#### backgrounds are a NIRC2 concept
-                        self.frame_failed.emit(
-                            no, "OSIRIS backgrounds are not supported in "
-                                "the GUI yet -- measured without")
-                    # full frame for the GUI (Eduardo: show the whole
-                    # detector, not the tool's central-1024 crop)
-                    reduced = osiris_reduce(raw, crop=False)
-                else:
-                    params = nirc2_frame_params(header)
-                    reduced = reduce_frame(raw, background=background,
-                                           flat=flat, badmask=mask)
-                key = (params.camname, params.pmsname, params.effwave_um,
-                       round(params.pmrangl_deg, 3), params.daytime,
-                       params.sfp)
-                if cal_error is not None and inst != "osiris":
-                    from ..image_strehl import _failed
+                params = inst.frame_params(header)
+                bg = background
+                if bg is not None and not inst.backgrounds_supported:
+                    self.frame_failed.emit(
+                        no, f"{inst.name} backgrounds are not supported in "
+                            "the GUI yet -- measured without")
+                    bg = None
+                flat, mask, cal_error, first = prep.calibration(inst)
+                if cal_error is not None and first:
+                    self.frame_failed.emit(no, cal_error + " -- frames are "
+                                           "shown but not measured")
+                # OSIRIS: the full frame for the GUI (Eduardo: show the
+                # whole detector, not the tool's central-1024 crop)
+                reduced = inst.reduce_frame(raw, background=bg, flat=flat,
+                                            mask=mask)
+                if cal_error is not None:
                     self.frame_done.emit(no, _failed(params, cal_error),
                                          params, reduced, None, header)
                     continue
-                if key not in dl_cache:
-                    dl_cache.clear()    # keep at most one 512^2 PSF around
-                    dl_cache[key] = nirc2_dl_psf(
-                        params.camname, params.pmsname, params.effwave_um,
-                        params.pmrangl_deg, npix=512, daytime=params.daytime,
-                        sfp=params.sfp)
+                dl = prep.dl_psf(inst, params)
                 result = None
                 if self.autofind:
                     kwargs = dict(
                         params=params,
-                        background_subtracted=background is not None,
+                        background_subtracted=bg is not None,
                         photometry_radius_arcsec=photrad,
                         bg_inner_arcsec=bgin, bg_outer_arcsec=bgout,
-                        peak_radius_arcsec=peakrad, dl_psf=dl_cache[key],
+                        peak_radius_arcsec=peakrad, dl_psf=dl,
                         robust_sky=self.robust_sky,
                         sky_override=self.sky_override,
                         auto_radius=self.auto_radius,
@@ -396,16 +374,15 @@ class Nirc2MeasureWorker(QThread):
                                         f"back to a detected star at "
                                         f"({pos[0]:.0f}, {pos[1]:.0f})")
                                 break
-                self.frame_done.emit(no, result, params, reduced,
-                                     dl_cache[key], header)
+                self.frame_done.emit(no, result, params, reduced, dl,
+                                     header)
             except Exception as e:
                 msg = f"{type(e).__name__}: {e}"
                 if reduced is not None and params is not None:
                     # the frame was read: show it with the failure
                     # (Eduardo 2026-10-06) instead of nothing
-                    from ..image_strehl import _failed
                     self.frame_done.emit(no, _failed(params, msg), params,
-                                         reduced, dl_cache.get(key), header)
+                                         reduced, dl, header)
                 else:
                     self.frame_failed.emit(no, msg)
         self.finished_all.emit()
@@ -549,10 +526,11 @@ class KeckNetworkCheck(QtCore.QObject):
 
 
 class LatestNightWorker(QThread):
-    """Finds tonight's frame directory off the GUI thread: NIRC2 on the
-    local /s disks (frame_watch.find_latest_night_dir, ~1 s), OSIRIS on
-    the AO server over rsync (find_latest_osiris_night, 2-20 s). Emits
-    done(path_or_empty, is_tonight, error_or_empty)."""
+    """Finds tonight's frame directory off the GUI thread, the way the
+    instrument's parameter file says (instruments.find_latest_night):
+    NIRC2 on the local /s disks (~1 s), OSIRIS on /s/sdata1100 directly
+    or over rsync (2-20 s), an added instrument from its `night` section.
+    Emits done(path_or_empty, is_tonight, error_or_empty)."""
     done = Signal(str, bool, str)
 
     def __init__(self, kind, parent=None):
@@ -560,12 +538,10 @@ class LatestNightWorker(QThread):
         self.kind = kind
 
     def run(self):
-        from .. import frame_watch
+        from .. import instruments
         try:
-            if self.kind == "osiris":
-                path, tonight = frame_watch.find_latest_osiris_night()
-            else:
-                path, tonight = frame_watch.find_latest_night_dir()
+            path, tonight = instruments.find_latest_night(
+                instruments.get(self.kind))
         except Exception as e:
             self.done.emit("", False, f"{type(e).__name__}: {e}")
             return

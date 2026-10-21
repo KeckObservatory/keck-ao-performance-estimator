@@ -1332,12 +1332,13 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             # a config's value counts as a user choice (_dark_auto stays off).
             self.dark_action.setChecked(c.get("dark_theme", False))
             n2 = c.get("nirc2", {})
-            self.n2_instrument.setCurrentText(n2.get("instrument", "NIRC2"))
+            inst_name = n2.get("instrument", "NIRC2")
+            if self.n2_instrument.findText(inst_name) >= 0:   # file removed?
+                self.n2_instrument.setCurrentText(inst_name)
             self._n2_inst_paths.update(n2.get("instrument_paths", {}))
             self._n2_inst_prefixes.update(n2.get("instrument_prefixes", {}))
             self.n2_prefix.setText(self._n2_inst_prefixes.get(
-                self._n2_inst_current,
-                "n" if self._n2_inst_current == "NIRC2" else ""))
+                self._n2_inst_current, self._nirc2_inst().default_prefix))
             self.n2_path.setText(n2.get("path", ""))
             self.n2_im1.setValue(int(n2.get("im1", 1)))
             self.n2_nim.setValue(int(n2.get("nim", 1)))

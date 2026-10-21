@@ -1,0 +1,29 @@
+# NIRC2 imager, Keck II. Uses the built-in NIRC2 code paths (the port of
+# the summit IDL tool), so every number matches the golden frames.
+key: nirc2
+name: NIRC2
+telescope: Keck II
+order: 10
+description: NIRC2 narrow / medium / wide camera, K2 summit superflat.
+
+identify:                       # any rule matching marks the frame NIRC2
+  - {keyword: INSTRUME, contains: NIRC2}
+  # older frames carry CAMNAME but no INSTRUME
+  - {keyword: CAMNAME, present: true, unless: [INSTRUME]}
+
+frames:
+  pattern: '^n(\d{4})\.fits$'   # group 1 = frame number
+  digits: 4
+  prefix: n
+  skip: '_unp[_.]'              # n_unp_NNNN.fits / KOA *_unp.fits copies
+  skip_reason: unprocessed (_unp) frame ignored
+
+night:
+  model: nirc2                  # /s/sdata900-907/<account>/<YYYYmonDD>[_X]
+params:
+  model: nirc2                  # CAMNAME plate scale, EFFWAVE, ROTPPOSN/EL
+reduce:
+  model: nirc2                  # bundled superflat + supermask
+  backgrounds: true
+pupil:
+  model: keck                   # PMSNAME pupil stop (largehex, ...)

@@ -3,4 +3,5 @@ scipy
 matplotlib
 astropy
 pillow
+pyyaml
 PyQt6

@@ -36,6 +36,7 @@ dependencies = [
     "matplotlib",
     "astropy",
     "pillow",
+    "pyyaml",
 ]
 
 # The GUI needs a Qt binding; the CLI/engine does not. Install with
@@ -77,7 +78,9 @@ packages = [
 
 [tool.setuptools.package-data]
 keck_ao_docs = ["*.pdf"]
-keck_ao_estimator = ["data/*.fits.gz", "data/*.zip", "data/*.npz"]
+keck_ao_estimator = ["data/*.fits.gz", "data/*.zip", "data/*.npz",
+                     "data/instruments/*.yaml",
+                     "data/instruments/*.example"]
 
 [tool.setuptools.dynamic]
 version = { attr = "keck_ao_estimator._version.__version__" }

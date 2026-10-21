@@ -316,7 +316,7 @@ def main():
     assert "Image N2.test_7  SR " in win.n2_log.toPlainText()
     win._on_nirc2_file_dclick(item_by("i0001_osiris.fits"))
     pump(lambda: win.n2_go.isEnabled())
-    assert "only NIRC2 and OSIRIS frames are supported" in win.n2_log.toPlainText()
+    assert "unknown instrument: not a known instrument" in win.n2_log.toPlainText()
     print("  [ok] file list shows all FITS; double-click measures numbered "
           "and KOA-named frames; non-NIRC2 refused by header")
 

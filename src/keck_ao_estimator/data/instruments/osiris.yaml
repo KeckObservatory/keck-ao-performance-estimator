@@ -1,0 +1,26 @@
+# OSIRIS imager, Keck I. Uses the built-in OSIRIS code paths (the K1 IDL
+# tool's port), so every number matches the golden frames.
+key: osiris
+name: OSIRIS
+telescope: Keck I
+order: 20
+description: OSIRIS imager (post-2016 detector), K1 tool reduction.
+
+identify:
+  - {keyword: CURRINST, contains: OSIRIS}
+  - {keyword: INSTRUME, contains: OSIRIS}
+
+frames:
+  pattern: '^i\d{6}_a(\d{6})\.fits$'   # i<YYMMDD>_a<set:3><frame:3>.fits
+  digits: 6
+  prefix: ''                    # filled in from the frames in PATH
+
+night:
+  model: osiris                 # /s/sdata1100/<account>/<YYMMDD>/IMAG/raw
+params:
+  model: osiris                 # IFILTER table, 9.95 mas, pupil angle 38
+reduce:
+  model: osiris                 # fix_image, no flat; backgrounds not supported
+  backgrounds: false
+pupil:
+  model: keck
