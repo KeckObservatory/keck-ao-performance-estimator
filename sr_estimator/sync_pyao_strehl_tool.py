@@ -26,6 +26,7 @@ CHANGELOG entries that mention PyAO).
 """
 import argparse
 import filecmp
+import glob
 import os
 import shutil
 import sys
@@ -36,8 +37,10 @@ ENGINE_MODULES = (
     "parallel.py", "frame_watch.py", "keck_network.py", "series_stats.py",
     "session_log.py", "instruments.py", "pupil_psf.py",
 )
-DATA_FILES = ("supermask.fits.gz", "instruments/nirc2.yaml",
-              "instruments/osiris.yaml", "instruments/TEMPLATE.yaml.example")
+DATA_FILES = ("supermask.fits.gz",)
+# every instrument parameter file is synced, so a collaborator's instrument
+# added here reaches PyAO's next release (data/instruments/*.yaml + template)
+INSTRUMENT_GLOBS = ("instruments/*.yaml", "instruments/*.example")
 VENDOR_DIR = os.path.join("kaotools", "strehl_tool", "_vendored_estimator")
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
     __file__))), "src", "keck_ao_estimator")
@@ -48,7 +51,11 @@ def pairs(pyao_root):
     dst = os.path.join(pyao_root, VENDOR_DIR)
     for name in ENGINE_MODULES:
         yield os.path.join(SRC, name), os.path.join(dst, name)
-    for name in DATA_FILES:
+    names = list(DATA_FILES)
+    for pattern in INSTRUMENT_GLOBS:
+        names += sorted(os.path.relpath(f, os.path.join(SRC, "data"))
+                        for f in glob.glob(os.path.join(SRC, "data", pattern)))
+    for name in names:
         yield (os.path.join(SRC, "data", name),
                os.path.join(dst, "data", name))
 
