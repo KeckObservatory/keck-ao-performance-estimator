@@ -97,12 +97,13 @@ def is_unp_frame(name):
     return re.search(r"_unp[_.]", name, re.IGNORECASE) is not None
 
 
-def is_frame_name(name, kind=None):
+def is_frame_name(name, kind=None, prefix=""):
     """`name` is a frame of instrument `kind` ("nirc2" / "osiris"), or of
-    either when kind is None."""
+    any when kind is None. With `prefix`, an instrument whose file sets
+    ``frames.watch_by_prefix`` (ORKID) accepts only that PREFIX's frames."""
     from .instruments import registry
     if kind is not None:
-        return registry()[kind].is_frame(name)
+        return registry()[kind].watches(name, prefix)
     return any(i.is_frame(name) for i in registry().values())
 
 
@@ -112,15 +113,16 @@ def nirc2_frame_number(name):
     return registry()["nirc2"].frame_number(name)
 
 
-def newest_frame(dirpath, kind=None):
+def newest_frame(dirpath, kind=None, prefix=""):
     """The last frame (by name) of instrument `kind` -- NIRC2 or OSIRIS
     imager, either when None -- in `dirpath` as (name, path, size_bytes),
-    or None when there is none or the directory can't be read."""
+    or None when there is none or the directory can't be read. `prefix`
+    narrows ORKID-like instruments to one PREFIX (is_frame_name)."""
     best = None
     try:
         with os.scandir(dirpath) as it:
             for entry in it:
-                if is_frame_name(entry.name, kind) and (
+                if is_frame_name(entry.name, kind, prefix) and (
                         best is None or entry.name > best.name):
                     best = entry
         if best is None:
@@ -306,14 +308,14 @@ def _rsync_list(target, filters=(), recursive=False, timeout=30.0):
     return parse_rsync_listing(_rsync(args + [target], timeout))
 
 
-def remote_newest_frame(host, rdir, kind=None, timeout=30.0):
+def remote_newest_frame(host, rdir, kind=None, timeout=30.0, prefix=""):
     """newest_frame() for a remote directory: (name, remote_path, size)
     or None when it holds no frame. Raises OSError when the listing
     fails (unreachable host, bad path, timeout)."""
     best = None
     for is_dir, name, size, _ in _rsync_list(f"{host}:{rdir}/",
                                               timeout=timeout):
-        if not is_dir and is_frame_name(name, kind) and (
+        if not is_dir and is_frame_name(name, kind, prefix) and (
                 best is None or name > best[0]):
             best = (name, size)
     if best is None:

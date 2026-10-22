@@ -172,6 +172,10 @@ class Nirc2StrehlTabMixin:
             "a parameter file in $KECK_AO_INSTRUMENTS "
             "(data/instruments/TEMPLATE.yaml.example).")
         self._n2_inst_paths = {i.name: "" for i in _insts}
+        # radii per instrument: an instrument file's apertures (ORKID's small
+        # sub-arrays), else the NIRC2 defaults; edits are kept per instrument
+        self._n2_inst_radii = {i.name: i.apertures for i in _insts
+                               if i.apertures}
         self._n2_inst_current = _insts[0].name
         self._n2_instrument_errors = load_errors()
         self.n2_instrument.currentTextChanged.connect(
@@ -996,14 +1000,24 @@ class Nirc2StrehlTabMixin:
         return self._nirc2_inst().digits
 
     def _nirc2_numbered_name(self, no):
-        """The numbered frame's file stem, <PREFIX><number>."""
-        return f"{self.n2_prefix.text().strip()}{int(no):0{self._nirc2_digits()}d}"
+        """The numbered frame's file stem, <PREFIX><number><suffix>."""
+        return self._nirc2_inst().frame_name(
+            self.n2_prefix.text().strip(), no)[:-len(".fits")]
 
     def _on_nirc2_instrument(self, text):
         old = self._n2_inst_current
         self._n2_inst_paths[old] = self.n2_path.text()
         self._n2_inst_prefixes[old] = self.n2_prefix.text()
+        self._n2_inst_radii[old] = self._nirc2_radii()
         self._n2_inst_current = text
+        radii = self._n2_inst_radii.get(text, (
+            engine.NIRC2_PHOTOMETRY_RADIUS_ARCSEC,
+            engine.NIRC2_BG_INNER_RADIUS_ARCSEC,
+            engine.NIRC2_BG_OUTER_RADIUS_ARCSEC,
+            engine.NIRC2_PEAK_RADIUS_ARCSEC))
+        for box, value in zip((self.n2_photrad, self.n2_bgin, self.n2_bgout,
+                               self.n2_peakrad), radii):
+            box.setValue(value)
         from ...instruments import get
         self.n2_prefix.setText(self._n2_inst_prefixes.get(
             text, get(text).default_prefix))
@@ -1144,8 +1158,9 @@ class Nirc2StrehlTabMixin:
             self._nirc2_watch_untick()
             return
         self._n2_watch_pending = None
-        self._n2_watcher = FrameWatchWorker(path, kind=self._nirc2_kind(),
-                                            parent=self)
+        self._n2_watcher = FrameWatchWorker(
+            path, kind=self._nirc2_kind(), parent=self,
+            prefix=self.n2_prefix.text().strip())
         self._n2_watcher.new_frame.connect(self._on_nirc2_new_frame)
         self._n2_watcher.status.connect(
             lambda m: self.n2_log.appendPlainText(f"auto-measure: {m}"))
@@ -1367,7 +1382,8 @@ class Nirc2StrehlTabMixin:
             sky_override=self._n2_sky_override,
             auto_radius=self.n2_auto_rad.isChecked(),
             psf_clean=False, idl_version=self._nirc2_idl_version(),
-            digits=self._nirc2_digits(), parent=self)
+            digits=self._nirc2_digits(), parent=self,
+            suffix=self._nirc2_inst().suffix)
         self._n2_worker.frame_done.connect(self._on_nirc2_frame_done)
         self._n2_worker.frame_failed.connect(self._on_nirc2_frame_failed)
         self._n2_worker.finished_all.connect(self._on_nirc2_finished)

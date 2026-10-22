@@ -46,7 +46,8 @@ columns and rounding; the text log is appended to `sr_tool_<UT date>.log` when
 the window closes. The journal is append-only — rows deleted in the image-log
 table stay in the file — and a re-measured frame is appended, not questioned.
 
-**Instruments** come from parameter files: NIRC2 and OSIRIS ship with the
+**Instruments** come from parameter files: NIRC2, OSIRIS and ORKID (the K2
+AO bench visible camera; bench PCU reference by default) ship with the
 package, and any `*.yaml` in a directory named by `$KECK_AO_INSTRUMENTS` is
 added to the Instrument menu (copy `data/instruments/TEMPLATE.yaml.example`).
 A file gives the header identity, frame names, where Latest looks, the plate

@@ -21,11 +21,15 @@ frames:
   pattern: '^img(\d{5})\.fits$' # regex on the file name; group 1 = number
   digits: 5                     # zero padding of the number (FIRST IMAGE)
   prefix: img                   # default PREFIX
+  # suffix: _0000               # text after the number (ORKID test_0014_0000.fits)
+  # watch_by_prefix: true       # auto-measure looks only at the PREFIX's files
+                                # (several prefixes share one directory)
   # skip: '_raw\.'              # names that match pattern but are not frames
   # skip_reason: raw copy ignored  # what the log says about them
 
 night:                          # the Latest button
-  model: directories            # or: none
+  model: directories            # or: fixed (one path for every night:
+                                # path: 'host:/dir' or '/dir'), or: none
   roots: ['/data/myinst/*']     # directories holding the night directories
   name_format: '%Y%m%d'         # night directory name (strftime codes)
   subdir: raw                   # frames are in <night>/<subdir>
@@ -62,3 +66,9 @@ pupil:
   diameter_m: 8.0               # primary diameter
   obscuration_m: 1.2            # central obscuration diameter (0 = none)
   spiders: {count: 4, width_m: 0.05, angle_deg: 45.0}
+
+# apertures:                    # optional: the GUI's default radii (arcsec)
+#   photometry_arcsec: 0.5      # for this instrument (else the NIRC2 ones)
+#   sky_inner_arcsec: 0.6
+#   sky_outer_arcsec: 0.8
+#   peak_arcsec: 0.1

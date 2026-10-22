@@ -195,9 +195,10 @@ class Nirc2MeasureWorker(QThread):
     def __init__(self, path, prefix, im1, nim, bg1, nbg, radii,
                  autofind=True, files=None, robust_sky=False,
                  sky_override=None, auto_radius=False, psf_clean=False,
-                 idl_version=None, digits=4, parent=None):
+                 idl_version=None, digits=4, parent=None, suffix=""):
         super().__init__(parent)
         self.path, self.prefix = path, prefix
+        self.suffix = suffix    # text after the number: ORKID _0000
         self.im1, self.nim, self.bg1, self.nbg = im1, nim, bg1, nbg
         self.radii = radii          # (photrad, bgin, bgout, peakrad) arcsec
         self.autofind = autofind
@@ -246,7 +247,8 @@ class Nirc2MeasureWorker(QThread):
     def _fname(self, no):
         import os
         return os.path.join(self.path,
-                            f"{self.prefix}{no:0{self.digits}d}.fits")
+                            f"{self.prefix}{no:0{self.digits}d}"
+                            f"{self.suffix}.fits")
 
     def run(self):
         import numpy as np
@@ -415,11 +417,14 @@ class FrameWatchWorker(QThread):
     new_frame = Signal(str)
     status = Signal(str)
 
-    def __init__(self, path, kind=None, interval_s=1.0, parent=None):
+    def __init__(self, path, kind=None, interval_s=1.0, parent=None,
+                 prefix=""):
         super().__init__(parent)
         self._lock = threading.Lock()
         self._path = path
         self.kind = kind
+        # ORKID: only this PREFIX's frames (frames.watch_by_prefix)
+        self.prefix = prefix
         self._interval_ms = int(interval_s * 1000)
         self._stop = False
 
@@ -451,9 +456,10 @@ class FrameWatchWorker(QThread):
             nf = None
             try:
                 if remote is not None:
-                    nf = remote_newest_frame(*remote, kind=self.kind)
+                    nf = remote_newest_frame(*remote, kind=self.kind,
+                                             prefix=self.prefix)
                 elif path:
-                    nf = newest_frame(path, self.kind)
+                    nf = newest_frame(path, self.kind, self.prefix)
                 if error is not None:
                     self.status.emit("rsync listing OK again")
                     error = None

@@ -1,0 +1,40 @@
+# ORKID visible camera on the Keck II AO bench (Andor Marana sCMOS). Uses
+# the built-in ORKID code paths (orkid.py), so the numbers match the ORKID
+# front end that the image-sharpening scripts used before (PyAO #1708).
+key: orkid
+name: ORKID
+telescope: Keck II
+order: 30
+description: ORKID visible camera, K2 AO bench; bench (PCU) reference by default.
+
+identify:                       # the camera server writes no INSTRUME card
+  - {keyword: CAMNAME, contains: orkid}
+
+frames:
+  pattern: '^.*?(\d{4})_\d{4}\.fits$'   # <PREFIX><set:4>_<file:4>.fits
+  digits: 4                     # numbered by the set: test_0014_0000.fits
+  prefix: test_
+  suffix: _0000                 # single frames carry file number 0000
+  watch_by_prefix: true         # every prefix shares one directory
+
+night:
+  model: fixed                  # the camera server writes every frame here
+  path: 'k2orkid:/sdata1651/test'
+
+params:
+  model: orkid                  # 6.60 mas/px, FWPOS/PWPOS filter table,
+  daytime: true                 # saturation 60000; daytime: bench PCU source
+                                # reference (set false for sky frames)
+reduce:
+  model: orkid                  # cube planes averaged, fix_image, no flat
+  backgrounds: true
+
+pupil:
+  model: orkid                  # bench: 11.0 m circular PCU pupil blurred by
+  source_blur_sigma_mas: 5.8    # the measured source size (NRM, 2026-10-14)
+
+apertures:                      # ORKID frames are small sub-arrays
+  photometry_arcsec: 0.35
+  sky_inner_arcsec: 0.40
+  sky_outer_arcsec: 0.48
+  peak_arcsec: 0.1

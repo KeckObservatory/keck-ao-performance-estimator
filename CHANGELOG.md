@@ -48,6 +48,22 @@ sync.
   menu; a file that does not load is named in the log.
   `data/instruments/TEMPLATE.yaml.example` documents every field.
   New dependency: PyYAML.
+- **ORKID as the third instrument file** (`data/instruments/orkid.yaml`,
+  engine `orkid.py` moved here from PyAO's `kaotools/strehl_tool/orkid.py`,
+  issue #1708). Built-in `orkid` models: 6.60 mas/px, wavelength from the two
+  filter wheels (FWPOS / PWPOS), cube planes averaged, saturation 60000, and
+  the bench reference (11.0 m circular PCU pupil blurred by the measured
+  5.8 mas source, `pupil.source_blur_sigma_mas`; `params.daytime: false` for
+  sky frames). On 11 real ORKID frames of 2026-10-21 the file path gives the
+  same Strehl as the old ORKID front end (difference 0). New optional file
+  fields: `frames.suffix` (ORKID's `_0000`), `frames.watch_by_prefix`
+  (auto-measure keeps to the PREFIX in a directory shared by several
+  prefixes), `night.model: fixed` (one directory, local or `host:/dir`) and
+  `apertures` (the GUI's default radii; ORKID 0.35 / 0.40-0.48 / 0.1 arcsec).
+  `identify()` now tries every file's `contains` rules before the `present`
+  ones, so ORKID frames (CAMNAME = orkid, no INSTRUME) are not taken by
+  NIRC2's rule for old frames. Regress: `gui_phase55` (new); `gui_phase54`
+  menu, `gui_phase43` saved paths and fake listing.
 
 ### Changed
 - **Duplicates are always appended.** Re-measuring a frame/star already in

@@ -17,11 +17,24 @@ separated by ``os.pathsep``). A file says:
 Each section names a ``model``. NIRC2 and OSIRIS use the built-in models
 ``nirc2`` / ``osiris`` / ``keck`` -- the existing code, so their numbers are
 unchanged (Eduardo 2026-10-21: "build it"; the golden frames are the
-parity test). A new instrument uses the generic models, which are pure
+parity test). ORKID (the K2 AO bench visible camera) uses the built-in
+``orkid`` models (orkid.py: two filter wheels, cube planes averaged, the
+bench PCU reference blurred by the measured source size) and a fixed
+Latest directory. A new instrument uses the generic models, which are pure
 data: ``params: {model: generic, ...}``, ``reduce: {model: generic}``,
 ``night: {model: directories}`` and ``pupil: {model: circular}`` (a circular
 primary with central obscuration and spider vanes, pupil_psf.py). See
 ``data/instruments/TEMPLATE.yaml.example`` for every field.
+
+Optional per-instrument fields: ``frames.suffix`` (text after the number,
+ORKID's ``_0000``), ``frames.watch_by_prefix`` (auto-measure considers only
+the PREFIX's files: ORKID writes every prefix into one directory) and
+``apertures`` (the GUI's default photometry / sky / peak radii).
+
+identify() tries the specific rules (``contains``) of every instrument
+before the catch-all ones (``present``), so an ORKID frame (CAMNAME = orkid,
+no INSTRUME) is not taken by NIRC2's rule for old frames (CAMNAME present,
+no INSTRUME).
 
 A file that does not load is skipped and reported in load_errors(); the
 tools show those messages instead of failing to start.
@@ -41,10 +54,12 @@ __all__ = ["INSTRUMENTS_ENV", "BUILTIN_DIR", "Instrument", "FramePrep",
 INSTRUMENTS_ENV = "KECK_AO_INSTRUMENTS"
 BUILTIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "data", "instruments")
-PARAMS_MODELS = ("nirc2", "osiris", "generic")
-REDUCE_MODELS = ("nirc2", "osiris", "generic")
-NIGHT_MODELS = ("nirc2", "osiris", "directories", "none")
-PUPIL_MODELS = ("keck", "circular")
+PARAMS_MODELS = ("nirc2", "osiris", "orkid", "generic")
+REDUCE_MODELS = ("nirc2", "osiris", "orkid", "generic")
+NIGHT_MODELS = ("nirc2", "osiris", "directories", "fixed", "none")
+PUPIL_MODELS = ("keck", "orkid", "circular")
+APERTURE_KEYS = ("photometry_arcsec", "sky_inner_arcsec", "sky_outer_arcsec",
+                 "peak_arcsec")
 
 
 def _header_str(header, key):
@@ -83,6 +98,9 @@ class Instrument:
     source: str
     description: str = ""
     skip_reason: str = "not a frame (matches the instrument's skip pattern)"
+    suffix: str = ""
+    watch_by_prefix: bool = False
+    apertures: tuple | None = None
 
     # ---- identity and file names
     def matches(self, header):
@@ -110,8 +128,16 @@ class Instrument:
             return None
 
     def frame_name(self, prefix, number):
-        """``<prefix><number zero-padded to digits>.fits``."""
-        return f"{prefix}{int(number):0{self.digits}d}.fits"
+        """``<prefix><number zero-padded to digits><suffix>.fits``."""
+        return f"{prefix}{int(number):0{self.digits}d}{self.suffix}.fits"
+
+    def watches(self, name, prefix=""):
+        """True for a frame auto-measure should consider: a frame of this
+        instrument and, when the file sets ``watch_by_prefix`` and a PREFIX
+        is given, one of that PREFIX (ORKID writes every prefix into one
+        directory, so name order across prefixes is not time order)."""
+        return self.is_frame(name) and not (
+            self.watch_by_prefix and prefix and not name.startswith(prefix))
 
     @property
     def backgrounds_supported(self):
@@ -128,6 +154,10 @@ class Instrument:
         if model == "osiris":
             from .osiris import osiris_frame_params
             return osiris_frame_params(header)
+        if model == "orkid":
+            from .orkid import orkid_frame_params
+            return orkid_frame_params(header,
+                                      daytime=bool(self.params.get("daytime", True)))
         return _generic_frame_params(self, header)
 
     def calibration(self):
@@ -138,7 +168,7 @@ class Instrument:
         if model == "nirc2":
             from . import image_strehl
             return image_strehl.load_nirc2_calibration()
-        if model == "osiris":
+        if model in ("osiris", "orkid"):
             return None, None
         return _generic_calibration(self)
 
@@ -153,6 +183,9 @@ class Instrument:
                                              flat=flat, badmask=mask)
         if model == "osiris":
             return image_strehl.osiris_reduce(raw, crop=False)
+        if model == "orkid":
+            from .orkid import orkid_reduce
+            return orkid_reduce(raw, background=background)
         red = np.asarray(raw, dtype=float)
         if background is not None:
             red = red - np.asarray(background, dtype=float)
@@ -171,6 +204,15 @@ class Instrument:
             red = image_strehl.fix_image(red)
         return red
 
+    def source_mfd_um(self):
+        """ORKID bench source blur as the equivalent fiber mode field
+        diameter at the PCU focus (um): MFD = 4 sigma x 0.727 um/mas, from
+        ``pupil.source_blur_sigma_mas`` (default: the measured 5.8 mas)."""
+        from .orkid import ORKID_BENCH_BLUR_SIGMA_MAS
+        sigma = float(self.pupil.get("source_blur_sigma_mas",
+                                     ORKID_BENCH_BLUR_SIGMA_MAS))
+        return round(4 * sigma * 0.727, 1)
+
     def dl_key(self, params):
         """What the diffraction-limited PSF depends on (a cache key)."""
         return (self.key, params.camname, params.pmsname,
@@ -185,6 +227,11 @@ class Instrument:
                                 params.effwave_um, params.pmrangl_deg,
                                 npix=npix, daytime=params.daytime,
                                 sfp=params.sfp)
+        if self.pupil["model"] == "orkid":
+            from .orkid import orkid_dl_psf
+            return orkid_dl_psf(params.effwave_um, params.plate_scale_mas,
+                                params.pmsname, params.pmrangl_deg, npix=npix,
+                                daytime=params.daytime, mfd_um=self.source_mfd_um())
         from .pupil_psf import circular_dl_psf
         p = self.pupil
         spiders = p.get("spiders") or {}
@@ -373,6 +420,17 @@ def _build(data, source):
     _model(night, NIGHT_MODELS, "night", source)
     pupil = dict(data["pupil"])
     _model(pupil, PUPIL_MODELS, "pupil", source)
+    if night["model"] == "fixed" and not str(night.get("path", "")).strip():
+        raise ValueError("night.model fixed needs a path")
+    apertures = None
+    if data.get("apertures") is not None:
+        ap = data["apertures"]
+        if not isinstance(ap, dict) or any(k not in ap for k in APERTURE_KEYS):
+            raise ValueError("apertures needs " + ", ".join(APERTURE_KEYS))
+        apertures = tuple(float(ap[k]) for k in APERTURE_KEYS)
+        if not (0 < apertures[0] <= apertures[1] < apertures[2]) or apertures[3] <= 0:
+            raise ValueError("apertures: need 0 < photometry <= sky_inner "
+                             "< sky_outer and peak > 0")
     if pupil["model"] == "circular" and float(pupil.get("diameter_m", 0)) <= 0:
         raise ValueError("pupil.model circular needs diameter_m > 0")
     if params["model"] == "generic" and not (
@@ -388,6 +446,9 @@ def _build(data, source):
         skip_regex=re.compile(skip, re.IGNORECASE) if skip else None,
         night=night, params=params, reduce=reduce, pupil=pupil,
         source=source, description=str(data.get("description", "")).strip(),
+        suffix=str(fr.get("suffix", "") or ""),
+        watch_by_prefix=bool(fr.get("watch_by_prefix", False)),
+        apertures=apertures,
         **({"skip_reason": str(fr["skip_reason"])}
            if fr.get("skip_reason") else {}))
 
@@ -463,10 +524,14 @@ def names():
 
 
 def identify(header):
-    """The first Instrument (menu order) whose identify rules match, else None."""
-    for inst in registry().values():
-        if inst.matches(header):
-            return inst
+    """The instrument whose identify rules match, else None: first any
+    instrument (menu order) with a matching ``contains`` rule, then one with
+    a matching ``present`` rule -- a specific rule wins over a catch-all."""
+    for specific in (True, False):
+        for inst in registry().values():
+            if any(_rule_matches(r, header) for r in inst.identify
+                   if ("contains" in r) == specific):
+                return inst
     return None
 
 
@@ -494,6 +559,11 @@ def find_latest_night(inst, utc_now=None):
         return frame_watch.find_latest_osiris_night(**kw)
     if model == "none":
         return None, False
+    if model == "fixed":
+        # one directory for every night (ORKID's camera server output);
+        # host:/dir paths are polled over rsync like any remote PATH
+        path = str(inst.night["path"]).strip()
+        return (path if ":" in path.split("/")[0] else os.path.expanduser(path)), True
     today = (utc_now or datetime.now(timezone.utc)).date()
     horizon = today + timedelta(days=1)
     fmt = inst.night.get("name_format", "%Y%m%d")

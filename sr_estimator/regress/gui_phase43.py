@@ -361,7 +361,7 @@ def main():
     os.environ["KECK_AO_REMOTE_CACHE"] = tempfile.mkdtemp(prefix="gui43_rc_")
     calls = {"list": 0, "fetch": 0}
 
-    def fake_list(host, rdir, kind=None, timeout=30.0):
+    def fake_list(host, rdir, kind=None, timeout=30.0, prefix=""):
         assert host == "k2ao"
         calls["list"] += 1
         nf = fw.newest_frame(server, kind)
@@ -457,7 +457,8 @@ def main():
 
     cfg = win._collect_config()["nirc2"]
     assert cfg["instrument"] == "NIRC2"
-    assert cfg["instrument_paths"] == {"NIRC2": tmp, "OSIRIS": rpath}, cfg
+    assert cfg["instrument_paths"] == {"NIRC2": tmp, "OSIRIS": rpath,
+                                       "ORKID": ""}, cfg
     win.n2_watch.setChecked(True)
     pump(lambda: win.n2_go.isEnabled())
 

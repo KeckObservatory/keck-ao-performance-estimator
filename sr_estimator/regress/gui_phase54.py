@@ -119,7 +119,7 @@ def main():
     assert "! instrument file skipped: " in log and "broken.yaml" in log
     items = [win.n2_instrument.itemText(i)
              for i in range(win.n2_instrument.count())]
-    assert items == ["NIRC2", "OSIRIS", "MYINST"], items
+    assert items == ["NIRC2", "OSIRIS", "ORKID", "MYINST"], items
     win.n2_instrument.setCurrentText("MYINST")
     assert win._nirc2_kind() == "myinst" and win._nirc2_digits() == 5
     assert win.n2_prefix.text() == "img"
