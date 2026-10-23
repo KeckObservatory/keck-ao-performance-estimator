@@ -6,7 +6,8 @@ reference with the measured source blur); ORKID headers (CAMNAME = orkid,
 no INSTRUME) are not taken by NIRC2's rule for old frames; frame names
 carry the _0000 suffix; auto-measure keeps to the PREFIX in ORKID's shared
 directory; the GUI switches to ORKID's apertures and PREFIX, measures a
-synthetic ORKID frame at S ~ 1, and Latest gives the camera server path.
+synthetic ORKID frame at S ~ 1, and Latest gives the camera server's
+UT-dated night folder; tracking frames get the sky reference.
 Offline; QT_QPA_PLATFORM=offscreen.
 """
 import os
@@ -77,9 +78,20 @@ def check_engine():
     assert o.frame_number("test_0014_0000.fits") == 14
     assert not instruments.get("nirc2").is_frame("test_0014_0000.fits")
     assert o.apertures == (0.35, 0.40, 0.48, 0.1)
-    assert instruments.find_latest_night(o) == ("k2orkid:/sdata1651/test", True)
+    from datetime import datetime, timezone
+    night = datetime(2026, 10, 23, 7, 0, tzinfo=timezone.utc)
+    assert instruments.find_latest_night(o, utc_now=night) == (
+        "k2orkid:/sdata1651/261023", True)
+    # daytime: auto -- the bench PCU reference unless the telescope tracked
+    sky = orkid_header()
+    sky["AXESTAT"] = "tracking"
+    ps = o.frame_params(sky)
+    assert not ps.daytime and ps == orkid.orkid_frame_params(sky, daytime=False)
+    sky["AXESTAT"] = "not controlling"
+    assert o.frame_params(sky).daytime
     print("  [ok] ORKID file reaches orkid.py's parameters, reduction and "
-          "reference; identity, names, apertures and Latest from the file")
+          "reference; identity, names, apertures, the UT-dated Latest and "
+          "the sky reference for tracking frames from the file")
 
     d = os.path.join(TMP, "shared")
     os.makedirs(d)
@@ -141,8 +153,10 @@ def main():
     win.n2_path.setText("")
     win._on_nirc2_latest()
     pump(lambda: win.n2_latest.isEnabled())
-    assert win.n2_path.text() == "k2orkid:/sdata1651/test", win.n2_path.text()
-    print("  [ok] Latest gives the camera server directory")
+    from datetime import datetime, timezone
+    want = datetime.now(timezone.utc).strftime("k2orkid:/sdata1651/%y%m%d")
+    assert win.n2_path.text() == want, (win.n2_path.text(), want)
+    print("  [ok] Latest gives the camera server's folder for tonight")
     win.close()
     print("gui_phase55: PASS")
 

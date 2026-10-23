@@ -5,7 +5,7 @@ key: orkid
 name: ORKID
 telescope: Keck II
 order: 30
-description: ORKID visible camera, K2 AO bench; bench (PCU) reference by default.
+description: ORKID visible camera, K2 AO bench; bench (PCU) reference by day, Keck pupil on sky.
 
 identify:                       # the camera server writes no INSTRUME card
   - {keyword: CAMNAME, contains: orkid}
@@ -18,13 +18,18 @@ frames:
   watch_by_prefix: true         # every prefix shares one directory
 
 night:
-  model: fixed                  # the camera server writes every frame here
-  path: 'k2orkid:/sdata1651/test'
+  model: fixed                  # the camera server's folder for the night,
+  path: 'k2orkid:/sdata1651/%y%m%d'   # named by the UT date (261023 = the
+                                # night of 2026-10-22 HST); bench frames go
+                                # to k2orkid:/sdata1651/test
 
 params:
   model: orkid                  # 6.60 mas/px, FWPOS/PWPOS filter table,
-  daytime: true                 # saturation 60000; daytime: bench PCU source
-                                # reference (set false for sky frames)
+  daytime: auto                 # saturation 60000; daytime: bench PCU source
+                                # reference unless the header says the
+                                # telescope was tracking (AXESTAT), then the
+                                # Keck pupil and a point source (true/false
+                                # force one)
 reduce:
   model: orkid                  # cube planes averaged, fix_image, no flat
   backgrounds: true

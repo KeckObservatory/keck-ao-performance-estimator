@@ -19,8 +19,9 @@ Each section names a ``model``. NIRC2 and OSIRIS use the built-in models
 unchanged (Eduardo 2026-10-21: "build it"; the golden frames are the
 parity test). ORKID (the K2 AO bench visible camera) uses the built-in
 ``orkid`` models (orkid.py: two filter wheels, cube planes averaged, the
-bench PCU reference blurred by the measured source size) and a fixed
-Latest directory. A new instrument uses the generic models, which are pure
+bench PCU reference blurred by the measured source size, or the Keck pupil
+when the header says the telescope was tracking: ``params.daytime: auto``)
+and a UT-dated Latest directory on the camera server. A new instrument uses the generic models, which are pure
 data: ``params: {model: generic, ...}``, ``reduce: {model: generic}``,
 ``night: {model: directories}`` and ``pupil: {model: circular}`` (a circular
 primary with central obscuration and spider vanes, pupil_psf.py). See
@@ -155,9 +156,12 @@ class Instrument:
             from .osiris import osiris_frame_params
             return osiris_frame_params(header)
         if model == "orkid":
-            from .orkid import orkid_frame_params
-            return orkid_frame_params(header,
-                                      daytime=bool(self.params.get("daytime", True)))
+            from .orkid import orkid_frame_params, orkid_header_on_sky
+            daytime = self.params.get("daytime", True)
+            if str(daytime).strip().lower() == "auto":
+                # bench PCU reference unless the telescope was tracking
+                daytime = not orkid_header_on_sky(header)
+            return orkid_frame_params(header, daytime=bool(daytime))
         return _generic_frame_params(self, header)
 
     def calibration(self):
@@ -560,9 +564,12 @@ def find_latest_night(inst, utc_now=None):
     if model == "none":
         return None, False
     if model == "fixed":
-        # one directory for every night (ORKID's camera server output);
-        # host:/dir paths are polled over rsync like any remote PATH
-        path = str(inst.night["path"]).strip()
+        # one directory (ORKID's camera server output); strftime codes take
+        # the UT date (ORKID: /sdata1651/%y%m%d, 261023 for the night of
+        # 2026-10-22 HST); host:/dir paths are polled over rsync like any
+        # remote PATH
+        path = (utc_now or datetime.now(timezone.utc)).strftime(
+            str(inst.night["path"]).strip())
         return (path if ":" in path.split("/")[0] else os.path.expanduser(path)), True
     today = (utc_now or datetime.now(timezone.utc)).date()
     horizon = today + timedelta(days=1)

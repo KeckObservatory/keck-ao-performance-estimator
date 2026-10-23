@@ -83,6 +83,16 @@ def orkid_wavelength_um(fwpos, pwpos):
     return None
 
 
+def orkid_header_on_sky(header):
+    """True when the header says the telescope was tracking (AXESTAT = tracking): an on-sky frame.
+
+    The camera server writes no PCU card. Daytime bench frames have the telescope parked (2026-10-12: AXESTAT
+    'not controlling', GUIDING FALSE, DOMESTAT standby); sky frames have AXESTAT and DOMESTAT 'tracking'
+    (2026-10-23, 10 Lac). A non-sidereal target (DTRACK enabled) also tracks.
+    """
+    return str(header.get("AXESTAT", "")).strip().lower() == "tracking"
+
+
 def orkid_frame_params(header, daytime=True, pmrangl_deg=0.0):
     """Measurement parameters from an ORKID FITS header.
 
