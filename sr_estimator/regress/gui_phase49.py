@@ -109,6 +109,9 @@ def main():
 
     app = QtWidgets.QApplication(sys.argv[:1])
     win = gui.MainWindow()
+    # these checks index the frame list by name (newest first is the
+    # default since 2026-10-25; gui_phase57 tests that order)
+    win.n2_file_sort.setCurrentText("Name")
 
     # ---- (2) multi-select list ------------------------------------------
     assert (win.n2_files.selectionMode()

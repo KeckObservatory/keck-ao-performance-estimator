@@ -55,6 +55,9 @@ Repository = "https://github.com/KeckObservatory/keck-ao-performance-estimator"
 Issues = "https://github.com/KeckObservatory/keck-ao-performance-estimator/issues"
 
 [project.scripts]
+kape = "keck_ao_estimator.cli:_cli"
+kape-gui = "keck_ao_estimator.gui.app:main"
+# the commands before the 1.6.0 rename, kept so scripts and habits still work
 keck-ao-estimator = "keck_ao_estimator.cli:_cli"
 keck-ao-estimator-gui = "keck_ao_estimator.gui.app:main"
 

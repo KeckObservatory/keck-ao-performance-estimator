@@ -461,7 +461,7 @@ def gui_tab():
     # the window title carries the app name + version
     assert gui.APP_NAME in win.windowTitle() and gui.__version__ in \
         win.windowTitle(), win.windowTitle()
-    assert gui.APP_NAME == "Keck AO Performance Estimator"
+    assert gui.APP_NAME == "KAPE"          # since 1.6.0
     print(f"  [ok] GUI: title bar shows '{gui.APP_NAME} v{gui.__version__}'")
 
     # bundled documentation resolves and is reachable from the Help menu

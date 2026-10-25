@@ -135,6 +135,9 @@ def main():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QtWidgets.QApplication(sys.argv[:1])
     win = gui.MainWindow()
+    # these checks index the frame list by name (newest first is the
+    # default since 2026-10-25; gui_phase57 tests that order)
+    win.n2_file_sort.setCurrentText("Name")
     win._nighttime_is_night = lambda: True     # gate-pin (house pattern)
     win.resize(1500, 950)
     win.show()
@@ -254,12 +257,14 @@ def main():
     assert n_after == n_before + 1, "click must append one measurement"
     s2 = float(win.n2_strehl_out.text())
     assert abs(s2 - 1.0) < 0.06, f"click re-measure S={s2}"
-    # autofind ON ignores clicks
+    # autofind ON: a click measures there too (Eduardo 2026-10-25: "so
+    # that we dont have to turn off autofind and click everytime")
     win.n2_autofind.setChecked(True)
+    n_rows = len(win._n2_csv_rows)
     win._on_nirc2_click(ev)
-    assert len(win.n2_log.toPlainText().splitlines()) == n_after, \
-        "autofind ON must ignore canvas clicks"
-    print(f"  [ok] AUTOFIND-off click re-measures (S={s2:.3f}); ON ignores")
+    assert len(win._n2_csv_rows) == n_rows + 1, \
+        "autofind ON: a canvas click measures"
+    print(f"  [ok] AUTOFIND-off click re-measures (S={s2:.3f}); ON too")
 
     # ---- AUTOFIND off: GO! must NOT measure — display and wait for click ---
     win.n2_autofind.setChecked(False)
@@ -274,6 +279,7 @@ def main():
     assert win.n2_object.text() == "synthetic", "identity shown before click"
     # cutout captions + live pick-zoom under the cursor
     assert win.n2_cap_dl.text() == "MODEL PSF"
+    ev.inaxes = win.n2_fig.axes[0]      # the redrawn image's axes
     win._on_nirc2_motion(ev)
     assert win.n2_cap_star.text() == "PICK ZOOM"
     assert win.n2_fig_star.axes and win.n2_fig_star.axes[0].images, \
@@ -284,9 +290,15 @@ def main():
     assert win.n2_cap_star.text() == "MEASURED STAR", "caption restored"
     assert "CLICK ON THE STAR" not in win.n2_fig.axes[0].get_title()
     assert "LGS" in win.n2_fig.axes[0].get_title(), "mode stays in the title"
-    win._on_nirc2_motion(ev)     # zoom must stay LOCKED after the click
+    # the pick zoom follows the cursor again after the click (Eduardo
+    # 2026-10-25), and leaving the image gives the measured star back
+    ev.inaxes = win.n2_fig.axes[0]
+    win._on_nirc2_motion(ev)
+    assert win.n2_cap_star.text() == "PICK ZOOM", \
+        "pick zoom follows the cursor after a click"
+    win._on_nirc2_image_leave(None)
     assert win.n2_cap_star.text() == "MEASURED STAR", \
-        "pick zoom must lock once the star is clicked"
+        "leaving the image restores the measured star"
     win.n2_autofind.setChecked(True)
     print("  [ok] AUTOFIND-off GO! displays without measuring; click measures")
 
@@ -316,7 +328,8 @@ def main():
     assert "Image N2.test_7  SR " in win.n2_log.toPlainText()
     win._on_nirc2_file_dclick(item_by("i0001_osiris.fits"))
     pump(lambda: win.n2_go.isEnabled())
-    assert "unknown instrument: not a known instrument" in win.n2_log.toPlainText()
+    assert ("unknown instrument (no INSTRUME / CURRINST / INSTR / CAMNAME): "
+            "not a known instrument") in win.n2_log.toPlainText()
     print("  [ok] file list shows all FITS; double-click measures numbered "
           "and KOA-named frames; non-NIRC2 refused by header")
 

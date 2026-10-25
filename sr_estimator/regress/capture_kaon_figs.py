@@ -622,7 +622,6 @@ def shot_g3_measured_sr(win, app):
     # it cannot coexist with the cutout pair in a single grab
     import types
     win.n2_autofind.setChecked(False)
-    win._n2_pick_locked = False
     r = win._n2_last_draw[1]
     ev = types.SimpleNamespace(xdata=r.x + 55.0, ydata=r.y + 40.0,
                                inaxes=win.n2_fig.axes[0])

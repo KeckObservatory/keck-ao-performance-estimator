@@ -1,4 +1,4 @@
-"""Keck AO Performance Estimator -- engine + GUI package.
+"""KAPE, the Keck AO Performance Estimator -- engine + GUI package.
 
 This top-level module is the curated public API: it re-exports every name
 the historical flat `ao_strehl_timeline.py` engine module used to expose
@@ -28,7 +28,8 @@ matplotlib.use("Agg")
 # astropy is only needed for the airmass calculation
 iers.conf.auto_download = False
 
-from ._version import APP_NAME, CONTACT, MAINTAINER, ORGANIZATION, __version__
+from ._version import (APP_FULL_NAME, APP_NAME, CONTACT, MAINTAINER,
+                       ORGANIZATION, __version__)
 from .atmosphere import (
     cn2_density_profile, integrated_cn2_to_seeing, seeing_to_integrated_cn2,
     theta0_d0_from_profile, zenith_seeing_factor,

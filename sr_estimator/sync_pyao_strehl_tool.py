@@ -37,6 +37,7 @@ ENGINE_MODULES = (
     "parallel.py", "frame_watch.py", "keck_network.py", "series_stats.py",
     "session_log.py", "instruments.py", "pupil_psf.py", "orkid.py",
     "nirc2_coadds.py", "osiris_ifs.py", "model_fwhm.py", "osiris_orp.py",
+    "planes.py",
 )
 DATA_FILES = ("supermask.fits.gz",)
 # every instrument parameter file is synced, so a collaborator's instrument

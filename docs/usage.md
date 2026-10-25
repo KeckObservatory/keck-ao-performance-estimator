@@ -3,7 +3,7 @@
 ## GUI
 
 ```bash
-keck-ao-estimator-gui
+kape-gui
 ```
 
 The GUI is organised as tabs that feed one shared engine:
@@ -273,11 +273,11 @@ results depend on scheduling, which is exactly what this release avoids.
 
 ```bash
 # a night's K-band LGS Strehl on K1
-keck-ao-estimator --telescope K1 --target --ra 17h45m40s --dec -29d00m28s \
+kape --telescope K1 --target --ra 17h45m40s --dec -29d00m28s \
     --dimm 20260525_dimm.dat --mass 20260525_mass.dat --masspro 20260525_masspro.dat
 
-keck-ao-estimator --version
-keck-ao-estimator --help
+kape --version
+kape --help
 ```
 
 The CLI writes a CSV table and figures. These outputs are the frozen reference

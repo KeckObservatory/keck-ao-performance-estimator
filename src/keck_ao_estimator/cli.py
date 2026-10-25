@@ -7,7 +7,7 @@ import os
 
 import numpy as np
 
-from ._version import __version__, APP_NAME
+from ._version import __version__, APP_FULL_NAME, APP_NAME
 from .budget import (
     DEF_LGS_OFFSET, INSTRUMENTS, DEFAULT_BUDGET_VERSION, LTAO_BW_FLOOR_FRAC,
     LTAO_RATE_SINGLE, LTAO_RATE_TOMO, apply_budget_version, ltao_bw_factor,
@@ -40,10 +40,10 @@ def build_parser():
         pass
 
     p = argparse.ArgumentParser(
-        prog="keck-ao-estimator",
+        prog="kape",
         formatter_class=_Fmt,
         description=(
-            f"{APP_NAME} (v{__version__}). "
+            f"{APP_NAME}, the {APP_FULL_NAME} (v{__version__}). "
             "Estimate and plot NGS / single-beacon LGS / LTAO Strehl at a "
             "chosen science wavelength (K band by default) across a night "
             "from CFHT MASS/DIMM data, for W. M. Keck Observatory, with the "

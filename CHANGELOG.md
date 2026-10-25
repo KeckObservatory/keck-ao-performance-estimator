@@ -1,15 +1,78 @@
 # Changelog
 
-All notable changes to the Keck AO Performance Estimator. The project
-is released on GitHub only (pin `@v1.5.0` in the install URL).
+All notable changes to KAPE, the Keck AO Performance Estimator. The
+project is released on GitHub only (pin `@v1.6.0` in the install URL).
 
-## Unreleased
+## 1.6.0 — 2026-10-25
+
+**The tool is now called KAPE.** Window title, About box, README and CLI help
+say KAPE (Keck AO Performance Estimator), and `kape` / `kape-gui` are the
+commands. The old `keck-ao-estimator` / `keck-ao-estimator-gui` commands
+still work, and the Python package keeps the name `keck_ao_estimator`
+(PyAO's `strehl_tool` vendors it).
+
+This release also brings the Measured SR tab level with PyAO's `strehl_tool`
+after its first summit nights (2026-10-20 to 10-25): NIRC2 coadds, OSIRIS IFU
+cubes, instrument parameter files, and the image viewer.
+
+### Added (2026-10-25)
+- **NIRC2 coadds** (`nirc2_coadds.py`). A frame with an `n_unp_NNNN.fits`
+  beside it can be stepped through coadd by coadd: Plane 0 ('sum') is the
+  frame, Plane k is coadd k (CDS / MCDS reads; a cut-short file counts only
+  its complete coadds). A coadd's SR is the short-exposure SR: its peak
+  against the frame's flux / N, because NIRC2's pattern noise makes a single
+  coadd's own flux unreliable. Flagged `coadd-short-exposure-sr`; not
+  compared with the (long-exposure) prediction.
+- **OSIRIS IFU cubes** (`osiris_ifs.py`, `model_fwhm.py`, `osiris_orp.py`,
+  instrument `OSIRIS IFU`). ORP cubes in `SPEC/ORP` are measured whole
+  ('all λ') or in wavelength bins of 'λ bin' channels, each at its own
+  wavelength (the title gives λc). FWHM comes from a forward fit of the hex
+  diffraction-limited PSF blurred by a Gaussian and integrated over the
+  spaxels, so it does not depend on where the star sits in its spaxel. SR is
+  relative (0.25″ aperture) and flagged `ifs-relative-sr`. Cubes without a
+  star above 8σ are refused. Each cube logs what the online pipeline (ORP)
+  subtracted, from the DRF in its header. For an A−B dither pair the star's
+  negative image is masked. With auto-measure on a `SPEC/ORP` directory,
+  `SPEC/raw` is checked every 20 s for frames that got no cube, and the log
+  says why (no DRF, failed, stuck, queued). Latest finds the night's
+  `SPEC/ORP`.
+- **Image viewer**, as in PyAO:
+  - Plane row above the image (cube planes, NIRC2 coadds, IFU bins) with
+    Play / Pause, fps and Loop. Playback is display only: Pause, or the last
+    plane with Loop off, measures the plane shown. A played coadd or IFU bin
+    has the same pixels and display limits as when it is measured.
+  - Mouse-wheel zoom around the cursor, left / middle drag to pan, Fit or F
+    to show the whole frame. The zoom is kept for frames of the same size.
+  - The pixel under the mouse (x, y, value) is read out over the image,
+    yellow near saturation and red at it.
+  - Right drag sets a DS9-style colour map (bias / contrast); right click
+    opens a menu with the stretches and Reset colour map.
+  - A click measures the star there with AUTOFIND on too. The PICK ZOOM
+    follows the cursor in every mode and gives the MEASURED STAR panel back
+    when the mouse leaves the image.
+- **Frame list**: newest first by default (or by name). A remote `host:/dir`
+  PATH is listed once with rsync and a frame is copied when it is measured.
+- **OSIRIS identity**: imager frames are recognised by their own `INSTR`
+  card. When a header's identity cards name another instrument (Keck I's
+  `CURRINST = MOSFIRE` on OSIRIS daytime frames) and it has no `INSTRUME`,
+  the frame's file name (`DATAFILE`, else the file's own name) is matched
+  against the instruments' frame patterns, and the log says so. K1 PCU fiber frames
+  (PCUNAME not telescope, AXESTAT not tracking) get NIRC2's daytime fiber
+  reference. NIRC2 and ORKID never do, because the K2 PCU is sometimes used
+  at night.
+- Image-log / CSV columns `Wavelength (um)`, `Sky` and `Flags`. The session
+  journal writes a row under the labels of an existing file, so a journal
+  started by an older version keeps its columns.
+- Regress `gui_phase56` (engine) and `gui_phase57` (viewer); `gui_phase29`,
+  `gui_phase43`, `gui_phase48`, `gui_phase49` and `gui_phase50` follow the
+  new click, hover and list behaviour.
+
+### Fixed (2026-10-20)
 
 Summit hotfixes from the first nights of the deployed PyAO `strehl_tool`
-(Eduardo 2026-10-20, k2aoserver-new); mirrored here so the two tools stay in
+(Eduardo 2026-10-20, k2aoserver-new), mirrored here so the two tools stay in
 sync.
 
-### Fixed
 - **Auto-measure measured a frame before its header was written.** The NIRC2
   writer gives the file its final size first and fills the header in after,
   so `frame_ready` (whole FITS blocks, size stable) passed while INSTRUME was

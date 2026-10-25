@@ -172,16 +172,47 @@ class NativeFilenameWorker(QThread):
         self.done.emit(out)
 
 
+def plane_label(label, plane):
+    """The frame label for plane `plane` (1-based) of a cube, a NIRC2
+    frame's coadd or an IFU cube's wavelength bin: ``<label> p<plane>``;
+    plane 0 (the whole frame) keeps the label. In sync with PyAO."""
+    return f"{label} p{int(plane)}" if plane else str(label)
+
+
+def fits_complete(path):
+    """True when `path` holds its whole primary HDU (a copy taken while the
+    camera server was still writing the file does not)."""
+    import os
+
+    from astropy.io import fits
+    try:
+        with fits.open(path) as hdul:
+            info = hdul.fileinfo(0)
+        return os.path.getsize(path) >= info["datLoc"] + info["datSpan"]
+    except Exception:
+        return False
+
+
 class Nirc2MeasureWorker(QThread):
-    """Measures the Strehl of a sequence of NIRC2 frames off the GUI thread
-    (the IDL Strehl tool's GO loop: image_strehl.measure_strehl per frame,
-    each needing its own ~1 s diffraction-limited PSF). Per frame emits
+    """Measures the Strehl of a sequence of frames off the GUI thread (the
+    IDL Strehl tool's GO loop: one measurement per frame). Per frame emits
     frame_done(imno, result_or_None, params, reduced_image, dl_psf,
-    header) --
-    result is None when autofind is off (the frame is loaded and displayed
-    but measurement waits for the user's click); a missing or broken frame
-    emits frame_failed(imno, message) and the loop continues. Emits
-    finished_all() when the sequence is exhausted.
+    header) -- result is None when autofind is off (the frame is loaded and
+    displayed but measurement waits for the user's click); a missing or
+    broken frame emits frame_failed(imno, message) and the loop continues.
+    Emits finished_all() when the sequence is exhausted; status(text) while
+    copying a remote frame.
+
+    `plane` (1-based) measures that plane of each frame instead of the whole
+    frame (0): a cube's plane, a NIRC2 frame's coadd from its _unp file
+    (short-exposure SR, nirc2_coadds) or an OSIRIS IFU cube's wavelength bin
+    of `ifs_bin` channels (osiris_ifs); labels carry `` p<plane>``.
+    `remote` = (host, dir) when PATH is remote: `path` is its local cache
+    and a frame missing there (or copied while still being written) is
+    copied with rsync first. `paths` maps each label to the file read and
+    `extras` to what the GUI needs beyond the signal (the plane count and
+    kind, an IFU cube's valid spaxels, a coadd's frame, the title note, the
+    ORP subtraction). In sync with PyAO's strehl_tool MeasureWorker.
 
     pause()/resume() genuinely SUSPEND the measurement loop (mutex +
     wait condition, checked once per frame before any work is done), so
@@ -191,14 +222,17 @@ class Nirc2MeasureWorker(QThread):
     frame_done = Signal(object, object, object, object, object, object)
     frame_failed = Signal(object, str)
     finished_all = Signal()
+    status = Signal(str)
 
     def __init__(self, path, prefix, im1, nim, bg1, nbg, radii,
                  autofind=True, files=None, robust_sky=False,
                  sky_override=None, auto_radius=False, psf_clean=False,
-                 idl_version=None, digits=4, parent=None, suffix=""):
+                 idl_version=None, digits=4, parent=None, suffix="",
+                 kind=None, plane=0, remote=None, ifs_bin=None):
         super().__init__(parent)
+        from ..osiris_ifs import IFS_DEFAULT_BIN
         self.path, self.prefix = path, prefix
-        self.suffix = suffix    # text after the number: ORKID _0000
+        self.suffix = suffix    # text after the number: ORKID _0000, IFU _*
         self.im1, self.nim, self.bg1, self.nbg = im1, nim, bg1, nbg
         self.radii = radii          # (photrad, bgin, bgout, peakrad) arcsec
         self.autofind = autofind
@@ -209,6 +243,12 @@ class Nirc2MeasureWorker(QThread):
         self.psf_clean = psf_clean
         self.idl_version = idl_version   # None = the engine default
         self.digits = digits    # frame-number width: NIRC2 4, OSIRIS 6
+        self.kind = kind        # the selected instrument (file-name fallback)
+        self.plane = int(plane or 0)
+        self.ifs_bin = int(ifs_bin or IFS_DEFAULT_BIN)
+        self.remote = remote
+        self.paths = {}
+        self.extras = {}
         self._pause_mutex = QtCore.QMutex()
         self._pause_cond = QtCore.QWaitCondition()
         self._paused = False
@@ -245,10 +285,69 @@ class Nirc2MeasureWorker(QThread):
         return not stop
 
     def _fname(self, no):
+        """The numbered frame <path>/<prefix><number><suffix>.fits; a `*` in
+        the suffix (OSIRIS IFU cubes' _<filter>_<scale>) is matched in a
+        local path (the first match)."""
+        import glob
         import os
-        return os.path.join(self.path,
-                            f"{self.prefix}{no:0{self.digits}d}"
-                            f"{self.suffix}.fits")
+        full = os.path.join(self.path, f"{self.prefix}{no:0{self.digits}d}"
+                                       f"{self.suffix}.fits")
+        if "*" in full:
+            found = sorted(glob.glob(full))
+            if found:
+                return found[0]
+        return full
+
+    def sequence(self):
+        """The (label, path) list this run measures (labels with the plane)."""
+        seq = (list(self.files) if self.files is not None else
+               [(str(no), self._fname(no))
+                for no in range(self.im1, self.im1 + self.nim)])
+        return [(plane_label(label, self.plane), fpath)
+                for label, fpath in seq]
+
+    def _local(self, fpath):
+        """`fpath`, first copied from the remote PATH when it is missing from
+        the cache or incomplete there."""
+        import os
+        if self.remote is None or fits_complete(fpath):
+            return fpath
+        from ..frame_watch import remote_fetch
+        host, rdir = self.remote
+        name = os.path.basename(fpath)
+        self.status.emit(f"copying {name} from {host}:{rdir} (rsync)")
+        return remote_fetch(host, f"{rdir}/{name}", os.path.dirname(fpath))
+
+    def _read_raw(self, hdul, name):
+        """The frame's pixels: the whole frame or cube, or only the selected
+        plane of a cube (read alone)."""
+        import numpy as np
+        if not self.plane:
+            return np.asarray(hdul[0].data, dtype=float)
+        naxis = int(hdul[0].header.get("NAXIS", 0))
+        planes = int(hdul[0].header.get("NAXIS3", 1)) if naxis == 3 else 1
+        if self.plane > planes:
+            raise ValueError(f"{name} has {planes} plane"
+                             f"{'s' if planes != 1 else ''}: no plane "
+                             f"{self.plane}")
+        if naxis == 3:
+            return np.asarray(hdul[0].section[self.plane - 1], dtype=float)
+        return np.asarray(hdul[0].data, dtype=float)
+
+    def _kwargs(self, dl, params=None, background_subtracted=False):
+        """measure_strehl's keywords for this run."""
+        photrad, bgin, bgout, peakrad = self.radii
+        kwargs = dict(
+            background_subtracted=background_subtracted,
+            photometry_radius_arcsec=photrad, bg_inner_arcsec=bgin,
+            bg_outer_arcsec=bgout, peak_radius_arcsec=peakrad, dl_psf=dl,
+            robust_sky=self.robust_sky, sky_override=self.sky_override,
+            auto_radius=self.auto_radius, psf_clean=self.psf_clean)
+        if params is not None:
+            kwargs["params"] = params
+        if self.idl_version is not None:
+            kwargs["idl_version"] = self.idl_version
+        return kwargs
 
     def run(self):
         import os
@@ -259,7 +358,9 @@ class Nirc2MeasureWorker(QThread):
         from ..frame_watch import (HEADER_WAIT_S, header_identifies,
                                    wait_for_header)
         from ..image_strehl import _failed, find_stars, measure_strehl
-        from ..instruments import FramePrep, identify_frame, identity_text, names
+        from ..instruments import (FramePrep, identify_frame, identity_text,
+                                   names)
+        from ..planes import plane_info
 
         # per-instrument calibration, loaded once; a missing one no longer
         # stops the run: frames are then shown but not measured (Eduardo
@@ -271,8 +372,8 @@ class Nirc2MeasureWorker(QThread):
             bgs = []
             for no in range(self.bg1, self.bg1 + self.nbg):
                 try:
-                    bgs.append(np.asarray(fits.getdata(self._fname(no)),
-                                          dtype=float))
+                    bgs.append(np.asarray(fits.getdata(
+                        self._local(self._fname(no))), dtype=float))
                 except Exception:
                     # find_strehl.pro: a bad background disables backgrounds
                     bgs = []
@@ -281,10 +382,7 @@ class Nirc2MeasureWorker(QThread):
                 background = np.mean(bgs, axis=0)
 
         photrad, bgin, bgout, peakrad = self.radii
-        seq = (self.files if self.files is not None else
-               [(str(no), self._fname(no))
-                for no in range(self.im1, self.im1 + self.nim)])
-        for no, fpath in seq:
+        for no, fpath in self.sequence():
             # honour a pause requested by the GUI (e.g. a duplicate-frame
             # question) BEFORE touching the next frame, so the run really
             # waits for the answer instead of queueing more results behind
@@ -293,6 +391,8 @@ class Nirc2MeasureWorker(QThread):
                 break
             reduced = params = header = dl = None
             try:
+                fpath = self._local(fpath)
+                self.paths[no] = fpath
                 header = fits.getheader(fpath)
                 if not header_identifies(header) and \
                         str(header.get("INSTRUME", "") or "") == "":
@@ -306,13 +406,11 @@ class Nirc2MeasureWorker(QThread):
                         fpath, should_stop=lambda: self._aborted)
                     if waited is not None:
                         header = waited
-                # the instrument parameter files (instruments.py) decide:
-                # NIRC2 and OSIRIS keep their own pipelines; any other
-                # instrument needs a file whose identify rules match
                 # by the header's identity cards, else by the frame's file
                 # name (OSIRIS daytime frames carry Keck I's CURRINST =
                 # MOSFIRE and no INSTRUME; in sync with PyAO's strehl_tool)
-                inst, how = identify_frame(header, os.path.basename(fpath))
+                inst, how = identify_frame(header, os.path.basename(fpath),
+                                           selected=self.kind)
                 if inst is None:
                     self.frame_failed.emit(
                         no, f"{identity_text(header)}: not a known "
@@ -325,36 +423,15 @@ class Nirc2MeasureWorker(QThread):
                             f"({identity_text(header)}) -- measured as "
                             f"{inst.name} from its file name")
                 if inst.is_ifs:
-                    # an OSIRIS spectrograph cube, measured whole: model
-                    # FWHM vs the diffraction limit, SR relative
-                    # (osiris_ifs; PyAO's strehl_tool also steps through
-                    # its wavelength bins)
-                    from .. import osiris_ifs
-                    if not osiris_ifs.is_ifs_cube(header):
-                        self.frame_failed.emit(
-                            no, "a raw spectrograph frame (spectra, not an "
-                                "image) -- open its cube in the night's "
-                                "SPEC/ORP")
-                        continue
-                    cube = osiris_ifs.read_cube(fpath)
-                    image, valid = osiris_ifs.collapse(cube)
-                    params = osiris_ifs.ifs_frame_params(
-                        header, float(cube.wavelengths_um.mean()))
-                    reduced = osiris_ifs.display_image(image, valid)
-                    dl = prep.dl_psf(inst, params)
-                    result = None
-                    if self.autofind:
-                        result = osiris_ifs.measure_ifs(
-                            image, valid, params,
-                            photometry_radius_arcsec=photrad,
-                            bg_inner_arcsec=bgin, bg_outer_arcsec=bgout,
-                            peak_radius_arcsec=peakrad, dl_psf=dl,
-                            idl_version=self.idl_version)
-                    self.frame_done.emit(no, result, params, reduced, dl,
-                                         header)
+                    self._measure_ifs(no, fpath, header, inst, prep)
+                    continue
+                if self.plane and inst.coadds_file == "unp" and \
+                        int(header.get("NAXIS", 0) or 0) == 2:
+                    self._measure_coadd(no, fpath, header, inst, prep,
+                                        background)
                     continue
                 with fits.open(fpath) as hdul:
-                    raw = np.asarray(hdul[0].data, dtype=float)
+                    raw = self._read_raw(hdul, os.path.basename(fpath))
                 params = inst.frame_params(header)
                 bg = background
                 if bg is not None and not inst.backgrounds_supported:
@@ -377,18 +454,7 @@ class Nirc2MeasureWorker(QThread):
                 dl = prep.dl_psf(inst, params)
                 result = None
                 if self.autofind:
-                    kwargs = dict(
-                        params=params,
-                        background_subtracted=bg is not None,
-                        photometry_radius_arcsec=photrad,
-                        bg_inner_arcsec=bgin, bg_outer_arcsec=bgout,
-                        peak_radius_arcsec=peakrad, dl_psf=dl,
-                        robust_sky=self.robust_sky,
-                        sky_override=self.sky_override,
-                        auto_radius=self.auto_radius,
-                        psf_clean=self.psf_clean)
-                    if self.idl_version is not None:
-                        kwargs["idl_version"] = self.idl_version
+                    kwargs = self._kwargs(dl, params, bg is not None)
                     result = measure_strehl(reduced, **kwargs)
                     if not result.ok:
                         # AUTOFIND's brightest pixel is not always a
@@ -414,6 +480,9 @@ class Nirc2MeasureWorker(QThread):
                                         f"back to a detected star at "
                                         f"({pos[0]:.0f}, {pos[1]:.0f})")
                                 break
+                planes, kind = plane_info(fpath, header, inst, self.ifs_bin,
+                                          remote=self.remote is not None)
+                self.extras[no] = {"planes": planes, "kind": kind}
                 self.frame_done.emit(no, result, params, reduced, dl,
                                      header)
             except Exception as e:
@@ -426,6 +495,183 @@ class Nirc2MeasureWorker(QThread):
                 else:
                     self.frame_failed.emit(no, msg)
         self.finished_all.emit()
+
+    def _measure_ifs(self, no, fpath, header, inst, prep):
+        """An OSIRIS spectrograph cube: the whole cube, or wavelength bin
+        `plane` of `ifs_bin` channels (osiris_ifs: model FWHM vs the
+        diffraction limit, SR relative); a raw spectrograph frame is
+        refused. Records the bin's central wavelength and what the ORP
+        subtracted (osiris_orp) for the GUI."""
+        import os
+
+        from .. import osiris_ifs, osiris_orp
+        name = os.path.basename(fpath)
+        if not osiris_ifs.is_ifs_cube(header):
+            self.frame_failed.emit(
+                no, f"{name}: a raw spectrograph frame (spectra, not an "
+                    "image) -- open its cube in the night's SPEC/ORP")
+            return
+        cube = osiris_ifs.read_cube(fpath)
+        bins = osiris_ifs.channel_bins(cube.nchan, self.ifs_bin)
+        if self.plane > len(bins):
+            raise ValueError(f"{name} has {len(bins)} wavelength bins of "
+                             f"{self.ifs_bin} channels: no bin {self.plane}")
+        lo, hi = (0, cube.nchan) if not self.plane else bins[self.plane - 1]
+        image, valid = osiris_ifs.collapse(cube, lo, hi)
+        params = osiris_ifs.ifs_frame_params(
+            header, float(cube.wavelengths_um[lo:hi].mean()))
+        dl = prep.dl_psf(inst, params)
+        result = None
+        if self.autofind:
+            photrad, bgin, bgout, peakrad = self.radii
+            result = osiris_ifs.measure_ifs(
+                image, valid, params, photometry_radius_arcsec=photrad,
+                bg_inner_arcsec=bgin, bg_outer_arcsec=bgout,
+                peak_radius_arcsec=peakrad, dl_psf=dl,
+                idl_version=self.idl_version)
+        stem = "_".join(name.split("_")[:2])
+        subtracted = osiris_orp.subtracted_frame(header)
+        self.extras[no] = {
+            "planes": len(bins), "kind": "ifs", "valid": valid,
+            "note": osiris_ifs.bin_label(cube.wavelengths_um, lo, hi),
+            "orp": osiris_orp.describe_subtraction(stem, subtracted),
+            "orp_kind": osiris_orp.subtraction_kind(stem, subtracted)}
+        self.frame_done.emit(no, result, params,
+                             osiris_ifs.display_image(image, valid), dl,
+                             header)
+
+    def _local_unp(self, fpath):
+        """The _unp file of the NIRC2 frame `fpath`, copied from the remote
+        PATH first when it is not here."""
+        import os
+        import re
+
+        from .. import nirc2_coadds
+        unp = nirc2_coadds.unp_path(fpath)
+        if unp is not None or self.remote is None:
+            return unp
+        from ..frame_watch import remote_fetch
+        host, rdir = self.remote
+        m = re.match(r"^n(\d+)\.fits$", os.path.basename(fpath))
+        name = (f"n_unp_{m.group(1)}.fits" if m else
+                os.path.splitext(os.path.basename(fpath))[0] + "_unp.fits")
+        self.status.emit(f"copying {name} (every coadd: large) from "
+                         f"{host}:{rdir} (rsync)")
+        remote_fetch(host, f"{rdir}/{name}", os.path.dirname(fpath))
+        return nirc2_coadds.unp_path(fpath)
+
+    def _measure_coadd(self, no, fpath, header, inst, prep, background):
+        """Coadd `plane` of a NIRC2 frame from its _unp file: the processed
+        frame first (the star and its flux), then the coadd's short-exposure
+        SR against it (nirc2_coadds.measure_coadd)."""
+        import os
+        from dataclasses import replace
+
+        import numpy as np
+        from astropy.io import fits
+
+        from .. import nirc2_coadds
+        from ..image_strehl import _failed, measure_strehl
+        name = os.path.basename(fpath)
+        unp = self._local_unp(fpath)
+        if unp is None:
+            self.frame_failed.emit(
+                no, f"{name}: no _unp file beside it (n_unp_NNNN.fits): its "
+                    "coadds are not on this disk")
+            return
+        params = inst.frame_params(header)
+        n = nirc2_coadds.coadd_count(unp, expected=params.coadds)
+        if self.plane > n:
+            raise ValueError(f"{name}: its _unp file holds {n} complete "
+                             f"coadd{'s' if n != 1 else ''}: no coadd "
+                             f"{self.plane}")
+        flat, mask, cal_error, first = prep.calibration(inst)
+        if cal_error is not None and first:
+            self.frame_failed.emit(no, cal_error + " -- frames are shown but "
+                                   "not measured")
+        bg = background
+        frame = inst.reduce_frame(np.asarray(fits.getdata(fpath), dtype=float),
+                                  background=bg, flat=flat, mask=mask)
+        coadd = inst.reduce_frame(
+            nirc2_coadds.read_coadd(unp, self.plane),
+            background=None if bg is None else bg / max(params.coadds, 1),
+            flat=flat, mask=mask)
+        self.extras[no] = {"planes": n, "kind": "coadd", "frame": frame,
+                           "coadds": params.coadds,
+                           "note": f"coadd {self.plane}/{n}"}
+        p1 = replace(params, coadds=1)
+        if cal_error is not None:
+            self.frame_done.emit(no, _failed(p1, cal_error), p1, coadd, None,
+                                 header)
+            return
+        dl = prep.dl_psf(inst, params)
+        result = None
+        if self.autofind:
+            kwargs = self._kwargs(dl, background_subtracted=bg is not None)
+            kwargs.pop("psf_clean", None)
+            fr = measure_strehl(frame, params=params, **kwargs)
+            result = nirc2_coadds.measure_coadd(coadd, fr, params.coadds,
+                                                **kwargs)
+        self.frame_done.emit(no, result, p1, coadd, dl, header)
+
+
+class RemoteListWorker(QThread):
+    """One rsync listing of a remote ``host:/dir`` PATH for the frame list:
+    emits done(path, [(name, mtime POSIX or None)], error) -- the files
+    (directories left out) with their modification times, or None and the
+    error. Frames are copied only when measured. In sync with PyAO."""
+    done = Signal(object, object, object)
+
+    def __init__(self, path, host, rdir, parent=None):
+        super().__init__(parent)
+        self.path, self.host, self.rdir = path, host, rdir
+
+    def run(self):
+        from .. import frame_watch
+        try:
+            rows = frame_watch._rsync_list(f"{self.host}:{self.rdir}/")
+        except Exception as e:
+            self.done.emit(self.path, None, f"{type(e).__name__}: {e}")
+            return
+        out = []
+        for is_dir, name, _size, mtime in rows:
+            if not is_dir:
+                out.append((name, mtime.timestamp() if mtime is not None
+                            else None))
+        self.done.emit(self.path, out, None)
+
+
+class OrpGapWorker(QThread):
+    """One check of an OSIRIS IFU night for raw spectrograph frames without
+    a cube (osiris_orp.check_night): emits done([(frame, reason)]) without
+    the frames in `reported`, or failed(message). In sync with PyAO."""
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, path, reported=(), drf_cache=None, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.reported = set(reported)
+        self.drf_cache = {} if drf_cache is None else drf_cache
+
+    def run(self):
+        from .. import frame_watch, osiris_orp
+        try:
+            remote = frame_watch.split_remote(self.path)
+            if remote is None:
+                out = osiris_orp.check_night(self.path,
+                                             drf_cache=self.drf_cache,
+                                             reported=self.reported)
+            else:
+                host, rdir = remote
+                out = osiris_orp.check_night(
+                    rdir, remote=host,
+                    cache_dir=frame_watch.remote_cache_dir(host, rdir) + "_orp",
+                    drf_cache=self.drf_cache, reported=self.reported)
+        except Exception as e:
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        self.done.emit(out)
 
 
 class FrameWatchWorker(QThread):

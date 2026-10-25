@@ -1,5 +1,5 @@
 """Zero-argument console entry point (see pyproject [project.scripts]
-keck-ao-estimator-gui)."""
+kape-gui, and the older keck-ao-estimator-gui)."""
 import sys
 
 from qtcompat import QtWidgets

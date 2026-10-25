@@ -27,7 +27,8 @@ from qtcompat import QTimer, Qt, QtCore, QtWidgets
 
 import keck_ao_estimator as engine
 
-from .._version import APP_NAME, MAINTAINER, ORGANIZATION, __version__
+from .._version import (APP_FULL_NAME, APP_NAME, MAINTAINER, ORGANIZATION,
+                        __version__)
 from .about import DOC_BENCH_DIAGRAMS, DOC_TECH_NOTE, DOC_USER_MANUAL, _bundled_doc
 from .constants import HIPS_SURVEYS, LOCAL_BACKDROP, NGS_LGS_ONLY_TERMS
 from .tabs.data import DataTabMixin
@@ -84,6 +85,10 @@ class _CloseStopsThreads:
         if callable(confirm) and not confirm():
             event.ignore()
             return
+        # Measured SR: stop cube playback and the viewer's timers first
+        shutdown = getattr(self, "_nirc2_shutdown", None)
+        if callable(shutdown):
+            shutdown()
         for t in self.findChildren(QtCore.QThread):
             if not t.isRunning():
                 continue
@@ -1552,7 +1557,7 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
         in the About dialog (at startup and from Help ▸ About)."""
         return f"""
         <h2 style="margin-bottom:2px">{APP_NAME}</h2>
-        <div style="color:#666">version {__version__}</div>
+        <div style="color:#666">{APP_FULL_NAME} — version {__version__}</div>
         <p>Developed by the <b>{ORGANIZATION}</b>. Distributed under the
         project's existing licence (GNU General Public License v3.0) — see the
         LICENSE file. This tool is provided as-is, with no warranty.</p>

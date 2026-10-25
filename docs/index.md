@@ -1,6 +1,6 @@
-# Keck AO Performance Estimator
+# KAPE — Keck AO Performance Estimator
 
-Estimate W. M. Keck Observatory adaptive-optics performance — NGS, single-beacon
+KAPE estimates W. M. Keck Observatory adaptive-optics performance — NGS, single-beacon
 LGS, and LTAO **Strehl** and **FWHM** at a chosen science wavelength — across a
 night from Mauna Kea MASS/DIMM seeing, using a semi-analytical error budget. A
 command-line tool and a PyQt GUI share one engine.

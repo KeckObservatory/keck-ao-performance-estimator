@@ -3,7 +3,8 @@
 automatic measurement fails (e.g. "centroid failed; try a bigger
 aperture") is still SHOWN, titled with the failure, the reason in the
 warning line, and a click on it measures there even with AUTOFIND on.
-The next frame clears the state. Offline; QT_QPA_PLATFORM=offscreen.
+Since 2026-10-25 a click measures on any frame with AUTOFIND on.
+Offline; QT_QPA_PLATFORM=offscreen.
 """
 import os
 import sys
@@ -53,12 +54,14 @@ def main():
     assert hits == [(120.0, 130.0)], hits
     print("  [ok] click measures on a failed frame with AUTOFIND on")
 
-    # an ordinary (successful) frame restores AUTOFIND's click-ignore
+    # an ordinary frame: with AUTOFIND on a click measures there too
+    # (Eduardo 2026-10-25: "so that we dont have to turn off autofind and
+    # click everytime")
     win._on_nirc2_frame_done(8, None, params, img.copy(), None)
     win.n2_autofind.setChecked(True)
     win._n2_frame_failed = False
     win._on_nirc2_click(ev)
-    assert len(hits) == 1, "AUTOFIND ignores clicks on a normal frame"
+    assert len(hits) == 2, "AUTOFIND on: a click measures on a normal frame"
     print("gui_phase50: all checks passed")
 
 

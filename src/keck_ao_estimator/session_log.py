@@ -66,14 +66,25 @@ def append_csv_row(path, columns, row, decimals=_DECIMALS):
     """Append one measurement `row` (a dict) to the CSV journal `path`,
     writing the column labels first when the file is new or empty.
     `columns` is the GUI's ``[(key, label), ...]``; values are formatted
-    with csv_cell. Creates the directory. Raises OSError on failure."""
+    with csv_cell. A journal written earlier with other columns (a tool
+    updated mid-night) keeps its own: the row goes in under that file's
+    labels, a column the file lacks is left out, so rows never misalign.
+    Creates the directory. Raises OSError on failure."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     new = not os.path.exists(path) or os.path.getsize(path) == 0
+    layout = columns
+    if not new:
+        with open(path, newline="", encoding="utf-8") as fh:
+            head = next(csv.reader(fh), None)
+        labels = [label for _key, label in columns]
+        if head and head != labels:
+            by_label = {label: key for key, label in columns}
+            layout = [(by_label.get(label), label) for label in head]
     with open(path, "a", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         if new:
             w.writerow([label for _key, label in columns])
-        w.writerow([csv_cell(row.get(key), decimals) for key, _label in columns])
+        w.writerow([csv_cell(row.get(key) if key else None, decimals) for key, _label in layout])
     return path
 
 

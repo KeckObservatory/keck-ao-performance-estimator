@@ -23,14 +23,17 @@ points PATH at tonight's NIRC2 directory on the NFS-mounted /s/sdata9NN
 disks (frame_watch.find_latest_night_dir -- the summit tool's KTL
 `runname` lookup is not available off the summit hosts).
 """
+import os
+import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import numpy as np
 import matplotlib.patheffects as patheffects
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from qtcompat import Qt, QtCore, QtWidgets
+from qtcompat import Qt, QtCore, QtGui, QtWidgets
 
 import keck_ao_estimator as engine
 from keck_ao_estimator import session_log
@@ -40,7 +43,9 @@ from ..widgets import LogView, SortableItem, _dspin, _shrinkable_label
 from ..workers import (CatalogFetchWorker, FieldMeasureWorker,
                        FieldPrologueWorker, FrameWatchWorker,
                        KeckNetworkCheck, LatestNightWorker,
-                       NativeFilenameWorker, Nirc2MeasureWorker)
+                       NativeFilenameWorker, Nirc2MeasureWorker,
+                       OrpGapWorker, RemoteListWorker, plane_label)
+from ...planes import PLANE_ZERO_TEXT, open_planes
 from .starlist_picker import _starlist_entry_mags
 
 # field-map annotation text over the new image background needs a halo to
@@ -80,6 +85,7 @@ NIRC2_CSV_COLUMNS = [
     ("predicted_fwhm", "Predicted FWHM (mas)"),
     ("delta_fwhm", "ΔFWHM (mas)"),
     ("filter", "Filter"),
+    ("effwave_um", "Wavelength (um)"),
     ("airmass", "Airmass"),
     ("pixel_x", "Pixel X"),
     ("pixel_y", "Pixel Y"),
@@ -88,7 +94,31 @@ NIRC2_CSV_COLUMNS = [
     ("lbwfs_fwhm", "LBWFS FWHM"),
     ("dimm_seeing", "DIMM seeing (arcsec)"),
     ("mass_seeing", "MASS seeing (arcsec)"),
+    ("sky_mode", "Sky"),
+    ("flags", "Flags"),
 ]
+
+# the frame list's orders: newest first (modification time: frames found by
+# auto-measure come in at the top) or by name ("Newest", not PyAO's "Newest
+# first": the combo shares its row with the list's caption in 330 px)
+FILE_SORTS = ["Newest", "Name"]
+_USER_ROLE = QtCore.Qt.ItemDataRole.UserRole
+_MTIME_ROLE = int(getattr(_USER_ROLE, "value", _USER_ROLE)) + 1  # item mtime
+PLAY_FPS = (0.5, 30.0, 5.0)     # cube playback rate: min, max, default
+PLAY_MARGIN = 0.1               # playback reads the view plus this on each side
+PLAY_TEXT, PAUSE_TEXT = "▶ Play", "❚❚ Pause"
+DRAG_PX = 3                     # a press-release moving at most this is a click
+ZOOM_STEP = 1.25                # main-image zoom factor per mouse-wheel step
+ZOOM_MIN_PX = 8                 # narrowest zoomed view (image pixels across)
+ORP_CHECK_MS = 20000            # OSIRIS IFU: SPEC/raw checked this often
+SATURATION_NEAR_FRAC = 0.8      # cursor readout: yellow from this share of
+                                # the saturation level, red at it
+# DS9-like colour map on top of the stretch: right-drag sets bias (left..
+# right) and contrast (bottom..top, log scale); 0.5 / 1 = the stretch alone
+BIAS_DEFAULT, CONTRAST_DEFAULT = 0.5, 1.0
+CONTRAST_RANGE = (0.1, 10.0)
+LIMIT_SAMPLES = 1 << 18         # percentile limits from at most ~this many px
+STRETCHES = ["IDL ±5σ", "linear %", "sqrt", "asinh", "log"]
 
 # duplicate-measurement guard: same frame AND the star centroid within this
 # many pixels of an already-logged row (re-clicking a point on the field
@@ -117,6 +147,53 @@ def _resolve_workers_safe():
         print(f"  WARNING: ${ENV_WORKERS}={os.environ.get(ENV_WORKERS)!r} "
               f"is invalid ({e}); using the default worker count instead")
         return default_workers()
+
+
+def _chronological(entry):
+    """Sort key of a (name, mtime) frame-list entry: modification time
+    (unknown last when newest first), then name."""
+    name, mtime = entry
+    return (float("-inf") if mtime is None else float(mtime), str(name))
+
+
+def _full_view(shape):
+    """(xlim, ylim) showing the whole of an image of `shape` (pixel
+    centres on integers, origin lower left)."""
+    return (-0.5, shape[1] - 0.5), (-0.5, shape[0] - 0.5)
+
+
+def _clamp_span(lo, hi, full_lo, full_hi):
+    """The axis range lo..hi shifted back inside full_lo..full_hi (the
+    whole range when it is wider)."""
+    width = hi - lo
+    if width >= full_hi - full_lo:
+        return full_lo, full_hi
+    if lo < full_lo:
+        return full_lo, full_lo + width
+    if hi > full_hi:
+        return full_hi - width, full_hi
+    return lo, hi
+
+
+def _block_mean(a, f):
+    """`a` averaged over f x f pixel blocks as float32 (a ragged edge is
+    dropped), summed from strided views."""
+    if f <= 1:
+        return np.asarray(a, dtype=np.float32)
+    ny, nx = a.shape[0] // f, a.shape[1] // f
+    acc = np.zeros((ny, nx), dtype=np.float32)
+    for i in range(f):
+        for j in range(f):
+            acc += a[i:ny * f:f, j:nx * f:f]
+    acc /= f * f
+    return acc
+
+
+def _subsample(a, n):
+    """A strided view of the 2D array `a` with at most about `n` pixels
+    (the same pixels for every plane)."""
+    step = max(1, int(np.ceil(np.sqrt(a.size / float(n)))))
+    return a[::step, ::step]
 
 
 class Nirc2StrehlTabMixin:
@@ -489,9 +566,24 @@ class Nirc2StrehlTabMixin:
         cal_note.setStyleSheet("QLabel { font-size:11px; }")
         left.addWidget(cal_note)
 
-        files_lbl = QtWidgets.QLabel("Frames in path — double-click to measure:")
+        files_lbl = QtWidgets.QLabel("Frames (double-click):")
+        files_lbl.setToolTip("Double-click a frame to measure it")
         set_cue(files_lbl, "secondary")
-        left.addWidget(files_lbl)
+        self.n2_file_sort = QtWidgets.QComboBox()
+        self.n2_file_sort.addItems(FILE_SORTS)
+        self.n2_file_sort.setToolTip(
+            "Order of the frame list. Newest (default): newest first, by file "
+            "modification time, so frames found by auto-measure come in at "
+            "the top (a remote PATH: the times rsync lists). Name: by file "
+            "name. Series stats measures the selected frames oldest first "
+            "either way.")
+        self.n2_file_sort.currentTextChanged.connect(self._on_nirc2_file_sort)
+        lbl_row = QtWidgets.QHBoxLayout()
+        lbl_row.setContentsMargins(0, 0, 0, 0)
+        lbl_row.addWidget(files_lbl)
+        lbl_row.addStretch(1)
+        lbl_row.addWidget(self.n2_file_sort)
+        left.addLayout(lbl_row)
         self.n2_native_names = QtWidgets.QCheckBox("Show native filenames")
         self.n2_native_names.setToolTip(
             "For directories of KOA-renamed frames (OI.<utdate>.<sec>."
@@ -524,11 +616,14 @@ class Nirc2StrehlTabMixin:
         self.n2_files.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.n2_files.setToolTip(
-            "n####.fits frames found in PATH — double-click one to set "
-            "FIRST IMAGE to it and measure it immediately; select several "
-            "(shift/ctrl-click) for Series stats")
+            "Frames in PATH — double-click one to measure it (a "
+            "summit-numbered n####.fits also sets FIRST IMAGE); select "
+            "several (shift/ctrl-click) for Series stats. A remote PATH "
+            "(host:/dir) is listed once with rsync and a frame is copied "
+            "when it is measured; press Enter in PATH to list again.")
         self.n2_files.itemDoubleClicked.connect(self._on_nirc2_file_dclick)
         self.n2_path.textChanged.connect(self._nirc2_refresh_files)
+        self.n2_path.returnPressed.connect(self._nirc2_refresh_files)
         left.addWidget(self.n2_files, 1)
         left_w = QtWidgets.QWidget()
         left_w.setLayout(left)
@@ -557,6 +652,26 @@ class Nirc2StrehlTabMixin:
         stretch_row.addWidget(self.n2_stretch)
         stretch_row.addWidget(QtWidgets.QLabel("White:"))
         stretch_row.addWidget(self.n2_white)
+        # the DS9-like colour map set by a right-drag on the image (shown
+        # only once it is moved off the stretch alone)
+        self.n2_cmap_lbl = QtWidgets.QLabel("")
+        set_cue(self.n2_cmap_lbl, "secondary")
+        self.n2_cmap_lbl.setToolTip(
+            "Colour map on top of the stretch (display only): right-drag on "
+            "the image sets it like DS9 (left-right = bias, down-up = "
+            "contrast); right-click the image for the stretch menu and "
+            "'Reset colour map'.")
+        stretch_row.addWidget(self.n2_cmap_lbl)
+        self.n2_fit = QtWidgets.QPushButton("Fit")
+        self.n2_fit.setToolTip(
+            "Show the whole frame again (or press F with the image "
+            "focused). Zoom with the mouse wheel over the image, around the "
+            "cursor, and pan by dragging with the left or middle button; "
+            "the view is kept while frames of the same size are shown "
+            "(re-measure, plane, playback, auto-measure) and resets for "
+            "another size.")
+        self.n2_fit.clicked.connect(self._nirc2_zoom_fit)
+        stretch_row.addWidget(self.n2_fit)
         stretch_row.addStretch(1)
         # rsync polling of an operations server must never be silent
         # (Eduardo 2026-09-22): shown whenever PATH is remote, red while
@@ -570,12 +685,106 @@ class Nirc2StrehlTabMixin:
         self.n2_fig = Figure(figsize=(4.6, 4.2), layout="constrained")
         self.n2_canvas = FigureCanvasQTAgg(self.n2_fig)
         self.n2_canvas.setMinimumHeight(260)
-        self.n2_canvas.mpl_connect("button_press_event", self._on_nirc2_click)
+        # a left click measures (or pauses playback), a left or middle drag
+        # pans, a right drag sets the colour map, a right click opens the
+        # stretch menu -- decided on release (_on_nirc2_press / _motion /
+        # _release); the wheel zooms around the cursor, F / Fit unzooms
+        self.n2_canvas.mpl_connect("button_press_event", self._on_nirc2_press)
+        self.n2_canvas.mpl_connect("button_release_event",
+                                   self._on_nirc2_release)
         self.n2_canvas.mpl_connect("motion_notify_event", self._on_nirc2_motion)
+        self.n2_canvas.mpl_connect("figure_leave_event",
+                                   self._on_nirc2_image_leave)
+        self.n2_canvas.mpl_connect("axes_leave_event",
+                                   self._on_nirc2_image_leave)
+        self.n2_canvas.mpl_connect("scroll_event", self._on_nirc2_scroll)
+        self.n2_canvas.mpl_connect("key_press_event", self._on_nirc2_key)
+        self.n2_canvas.setFocusPolicy(QtCore.Qt.FocusPolicy.WheelFocus)
+        # the pixel under the mouse, drawn over the image's bottom-left
+        # corner (no layout space): x, y and the value in the frame shown,
+        # yellow near saturation and red at it
+        self.n2_cursor_label = QtWidgets.QLabel(self.n2_canvas)
+        self.n2_cursor_label.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.n2_cursor_label.hide()
+
+        # which plane of the frame is measured: a cube's planes, a NIRC2
+        # frame's coadds (its _unp file) or an OSIRIS IFU cube's wavelength
+        # bins; Play shows them in turn (display only)
+        self.n2_plane = QtWidgets.QSpinBox()
+        self.n2_plane.setRange(0, 0)
+        self.n2_plane.setSpecialValueText("mean")
+        self.n2_plane_slider = QtWidgets.QSlider(
+            QtCore.Qt.Orientation.Horizontal)
+        self.n2_plane_slider.setRange(0, 0)
+        tip = ("Plane: which plane of the frame is measured.\n"
+               "ORKID data cubes: 'mean' (0) averages every plane; 1..N "
+               "measures that plane alone.\n"
+               "NIRC2: the frame's coadds, read from its n_unp_NNNN.fits "
+               "(the raw reads of each coadd). 'sum' (0) is the frame "
+               "itself; coadd k gives the short-exposure SR -- its peak "
+               "against the frame's flux / N, since NIRC2's pattern noise "
+               "makes a single coadd's own flux unreliable.\n"
+               "OSIRIS IFU cubes: 'all λ' (0) is the whole cube; 1..N are "
+               "wavelength bins of 'λ bin' channels (the title gives the "
+               "wavelength).\n"
+               "Changing it re-measures the frame on display: scroll with "
+               "the mouse wheel, the arrow keys or the slider. Measure and "
+               "Series stats use it for every frame (labels '<frame> "
+               "p<plane>'); a double-click or auto-measure starts again at "
+               "0.")
+        self.n2_plane.setToolTip(tip)
+        self.n2_plane_slider.setToolTip(tip)
+        self.n2_plane.valueChanged.connect(self.n2_plane_slider.setValue)
+        self.n2_plane_slider.valueChanged.connect(self.n2_plane.setValue)
+        self.n2_plane.valueChanged.connect(self._on_nirc2_plane_changed)
+        from ...osiris_ifs import IFS_DEFAULT_BIN
+        self.n2_ifs_bin = QtWidgets.QSpinBox()
+        self.n2_ifs_bin.setRange(1, 4096)
+        self.n2_ifs_bin.setValue(IFS_DEFAULT_BIN)
+        self.n2_ifs_bin.setSuffix(" ch")
+        self.n2_ifs_bin.setPrefix("λ bin ")
+        self.n2_ifs_bin.hide()      # takes the slider's place for an IFU cube
+        self.n2_ifs_bin.setToolTip(
+            "λ bin: channels per plane of an OSIRIS IFU cube (0.25 nm each "
+            "in Kn3/Kbb at the ORP's sampling; Kn3 has 433, Kbb 1665). A "
+            "single channel is noisy and can sit on a sky or telluric line; "
+            "each bin is measured at its own wavelength. Changing it "
+            "re-measures the cube on display.")
+        self.n2_ifs_bin.valueChanged.connect(self._on_nirc2_ifs_bin_changed)
+        self.n2_play = QtWidgets.QPushButton(PLAY_TEXT)
+        self.n2_play.setCheckable(True)
+        self.n2_play.setToolTip(
+            "Play the cube on display plane by plane (DISPLAY ONLY: nothing "
+            "is measured or logged while it plays; Plane follows). Pause -- "
+            "or the last plane with Loop off -- measures the plane shown, "
+            "once. Measure, a double-click, auto-measure, Series stats or a "
+            "new PATH stop it without measuring; a click on the image "
+            "pauses it. Moving Plane while playing jumps there.")
+        self.n2_play.toggled.connect(self._on_nirc2_play_toggled)
+        fps_lo, fps_hi, fps_default = PLAY_FPS
+        self.n2_fps = _dspin(fps_lo, fps_hi, 0.5, fps_default, 1, " fps")
+        self.n2_fps.setToolTip("Playback rate (planes per second); a rate "
+                               "the machine cannot draw plays as fast as it "
+                               "can")
+        self.n2_loop = QtWidgets.QCheckBox("Loop")
+        self.n2_loop.setChecked(True)
+        self.n2_loop.setToolTip("Start again at plane 1 after the last "
+                                "plane; off: stop there and measure it")
+        plane_row = QtWidgets.QHBoxLayout()
+        plane_row.setContentsMargins(0, 0, 0, 0)
+        plane_row.addWidget(QtWidgets.QLabel("Plane:"))
+        plane_row.addWidget(self.n2_plane)
+        plane_row.addWidget(self.n2_plane_slider, 1)
+        plane_row.addWidget(self.n2_ifs_bin)
+        plane_row.addWidget(self.n2_play)
+        plane_row.addWidget(self.n2_fps)
+        plane_row.addWidget(self.n2_loop)
 
         img_tab = QtWidgets.QWidget()
         img_v = QtWidgets.QVBoxLayout(img_tab)
         img_v.setContentsMargins(0, 0, 0, 0)
+        img_v.addLayout(plane_row)
         img_v.addWidget(self.n2_canvas)
 
         map_tab = QtWidgets.QWidget()
@@ -862,7 +1071,6 @@ class Nirc2StrehlTabMixin:
         self._n2_names_worker = None   # single-flight native-filename lookup
         self._n2_field = []            # measured-field results for the map
         self._n2_last_draw = None      # (title, result-or-None) for redraws
-        self._n2_pick_locked = False   # zoom stops following after a click
         self._n2_sky_override = None   # picked sky value (ADU), None = annulus
         self._n2_frame_hst = None   # last measured frame's HST timestamp
         self._n2_image = None       # last reduced frame (for click re-measure)
@@ -879,6 +1087,7 @@ class Nirc2StrehlTabMixin:
         self._n2_field_redraw_timer = QtCore.QTimer(self)
         self._n2_field_redraw_timer.setSingleShot(True)
         self._n2_field_redraw_timer.timeout.connect(self._nirc2_draw_map)
+        self._nirc2_init_viewer()
         self._n2_tab_page = w          # for the "rsync" tab-title flag
         self.plot_tabs.currentChanged.connect(self._nirc2_tab_shown)
         self._nirc2_check_network()
@@ -899,20 +1108,88 @@ class Nirc2StrehlTabMixin:
         remote = split_remote(path)
         return remote_cache_dir(*remote) if remote else path
 
-    def _nirc2_refresh_files(self):
-        import os
+    def _nirc2_refresh_files(self, *_):
+        """Re-list the FITS frames in PATH in the selected order (files the
+        instrument skips, e.g. NIRC2 _unp copies, excluded); an empty
+        PREFIX is filled in from them. A remote PATH (host:/dir) is listed
+        once over rsync (_nirc2_start_remote_list), not per keystroke."""
+        from ...frame_watch import split_remote
         self.n2_files.clear()
+        if split_remote(self.n2_path.text().strip()) is not None:
+            self._n2_remote_list_timer.start()
+            return
         d = self._nirc2_frames_dir()
-        if not os.path.isdir(d):
+        if not d or not os.path.isdir(d):
             return
         try:
-            names = sorted(n for n in os.listdir(d)
-                           if n.lower().endswith((".fits", ".fits.gz")))
+            names = os.listdir(d)
         except OSError:
             return
+        self._nirc2_fill_files(d, names)
+
+    def _nirc2_start_remote_list(self):
+        """List the remote PATH once over rsync (RemoteListWorker); a
+        listing still running is left to finish and the list is asked for
+        again after it."""
+        from ...frame_watch import split_remote
+        path = self.n2_path.text().strip()
+        remote = split_remote(path)
+        if remote is None:
+            return
+        w = self._n2_remote_list_worker
+        if w is not None and w.isRunning():
+            self._n2_remote_list_timer.start()
+            return
+        self.n2_log.appendPlainText(f"listing {remote[0]}:{remote[1]} (rsync)")
+        self._n2_remote_list_worker = RemoteListWorker(path, *remote,
+                                                       parent=self)
+        self._n2_remote_list_worker.done.connect(self._on_nirc2_remote_list)
+        self._n2_remote_list_worker.start()
+
+    def _on_nirc2_remote_list(self, path, entries, error):
+        """Show a remote listing, (name, mtime) pairs, in the frame list
+        (only while PATH is still the listed one)."""
+        if path != self.n2_path.text().strip():
+            return
+        if entries is None:
+            self.n2_log.appendPlainText(f"! listing {path} failed: {error}")
+            return
+        self.n2_files.clear()
+        self._nirc2_fill_files(self._nirc2_frames_dir(),
+                               [name for name, _mtime in entries],
+                               remote=True, mtimes=dict(entries))
+        self.n2_log.appendPlainText(
+            f"  {self.n2_files.count()} frames in {path}")
+
+    def _nirc2_file_order(self):
+        """(key, reverse) sorting (name, mtime) entries the FILE_SORTS way
+        selected: newest first (unknown times last), or by name."""
+        if self.n2_file_sort.currentText() == FILE_SORTS[1]:
+            return (lambda entry: str(entry[0])), False
+        return _chronological, True
+
+    @staticmethod
+    def _nirc2_local_mtime(d, name):
+        try:
+            return os.stat(os.path.join(d, name)).st_mtime
+        except OSError:
+            return None
+
+    def _nirc2_fill_files(self, d, names, remote=False, mtimes=None):
+        """Put the FITS frames among `names` into the list in the selected
+        order (directory `d`; a remote PATH's cache when `remote`).
+        `mtimes` maps a name to its modification time (a remote listing's);
+        without it each local file's own is read."""
         inst = self._nirc2_inst()
-        # files the instrument skips (NIRC2's _unp copies) are not listed
-        names = [n for n in names if not inst.is_skipped(n)]
+        names = [n for n in names
+                 if n.lower().endswith((".fits", ".fits.gz"))
+                 and not inst.is_skipped(n)]
+        if mtimes is None:
+            mtimes = {n: self._nirc2_local_mtime(d, n) for n in names}
+        key, reverse = self._nirc2_file_order()
+        entries = sorted(((n, mtimes.get(n)) for n in names), key=key,
+                         reverse=reverse)
+        names = [n for n, _mtime in entries]
         if not self.n2_prefix.text().strip():
             # an empty PREFIX (OSIRIS: i<YYMMDD>_a) is filled in from the
             # frames: the name up to the frame-number group
@@ -921,12 +1198,28 @@ class Nirc2StrehlTabMixin:
                 if m is not None and m.groups() and m.group(1) is not None:
                     self.n2_prefix.setText(n[:m.start(1)])
                     break
-        for name in names:
+        role = QtCore.Qt.ItemDataRole.UserRole
+        for name, mtime in entries:
             item = QtWidgets.QListWidgetItem(name)
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, name)
+            item.setData(role, name)
+            item.setData(_MTIME_ROLE, mtime)
             self.n2_files.addItem(item)
-        if self.n2_native_names.isChecked() and names:
+        if self.n2_native_names.isChecked() and names and not remote:
             self._nirc2_start_native_lookup(d, names)
+
+    def _on_nirc2_file_sort(self, *_):
+        """Re-order the frame list in place (a remote PATH is not listed
+        again), keeping the selection and any native names shown."""
+        key, reverse = self._nirc2_file_order()
+        role = QtCore.Qt.ItemDataRole.UserRole
+        selected = {it.data(role) for it in self.n2_files.selectedItems()}
+        items = [self.n2_files.takeItem(0)
+                 for _ in range(self.n2_files.count())]
+        items.sort(key=lambda it: key((it.data(role), it.data(_MTIME_ROLE))),
+                   reverse=reverse)
+        for item in items:
+            self.n2_files.addItem(item)
+            item.setSelected(item.data(role) in selected)
 
     def _nirc2_start_native_lookup(self, dirpath, names):
         """Background DATAFILE-header lookup for the native-filenames
@@ -954,8 +1247,8 @@ class Nirc2StrehlTabMixin:
                 item.setToolTip(disk_name)
 
     def _on_nirc2_file_dclick(self, item):
-        import os
         import re
+        self._nirc2_set_plane(0)        # a new frame starts at its sum/mean
         disk_name = item.data(QtCore.Qt.ItemDataRole.UserRole) or item.text()
         m = re.match(rf"^{re.escape(self.n2_prefix.text().strip())}"
                      rf"(\d{{{self._nirc2_digits()}}})\.fits$", disk_name)
@@ -1009,6 +1302,7 @@ class Nirc2StrehlTabMixin:
             self.n2_prefix.text().strip(), no)[:-len(".fits")]
 
     def _on_nirc2_instrument(self, text):
+        self._nirc2_play_stop()
         old = self._n2_inst_current
         self._n2_inst_paths[old] = self.n2_path.text()
         self._n2_inst_prefixes[old] = self.n2_prefix.text()
@@ -1178,8 +1472,13 @@ class Nirc2StrehlTabMixin:
             f"{REMOTE_POLL_S:.0f} s; frames copied to "
             f"{self._nirc2_frames_dir()}")
         self._nirc2_update_rsync_flag()
+        self._nirc2_orp_watch_start(path)
 
     def _nirc2_watch_stop(self):
+        timer = getattr(self, "_n2_orp_timer", None)
+        if timer is not None:           # the OSIRIS IFU raw-frame check too
+            timer.stop()
+            self._n2_orp_path = None
         w = getattr(self, "_n2_watcher", None)
         self._n2_watcher = None
         self._n2_watch_pending = None
@@ -1205,6 +1504,8 @@ class Nirc2StrehlTabMixin:
             else:
                 w.set_path(text.strip())
                 self._n2_watch_pending = None
+                if getattr(self, "_n2_orp_path", None) is not None:
+                    self._nirc2_orp_watch_start(text.strip())
         self._n2_watch_path = text.strip()
         self._nirc2_update_rsync_flag()
 
@@ -1269,6 +1570,7 @@ class Nirc2StrehlTabMixin:
                 or self._nirc2_watch_busy()):
             return
         self._n2_watch_pending = None
+        self._nirc2_set_plane(0)
         name = os.path.basename(fpath)
         self.n2_log.appendPlainText(f"auto-measure: new frame {name}")
         inst = self._nirc2_inst()
@@ -1320,7 +1622,10 @@ class Nirc2StrehlTabMixin:
 
     def _nirc2_start(self, files=None):
         """Shared worker launch for GO! (numbered sequence) and the file
-        list's double-click (explicit file), with the strehl_widget guards."""
+        list's double-click (explicit file), with the strehl_widget guards
+        (any cube playback is stopped first, without measuring its
+        plane)."""
+        self._nirc2_play_stop()
         if self._n2_worker is not None and self._n2_worker.isRunning():
             self.n2_log.appendPlainText("! measurement already running")
             return
@@ -1364,6 +1669,7 @@ class Nirc2StrehlTabMixin:
             self._nirc2_start_worker(path, files)
 
     def _nirc2_start_worker(self, path, files):
+        from ...frame_watch import split_remote
         # PSF-fit cleaning is a MEASURE-FIELD feature only (Eduardo
         # 2026-08-07). Left on this path it built a fresh empirical PSF for
         # EVERY frame -- seconds of deep-catalogue + ePSF work before the
@@ -1387,7 +1693,11 @@ class Nirc2StrehlTabMixin:
             auto_radius=self.n2_auto_rad.isChecked(),
             psf_clean=False, idl_version=self._nirc2_idl_version(),
             digits=self._nirc2_digits(), parent=self,
-            suffix=self._nirc2_inst().suffix)
+            suffix=self._nirc2_inst().suffix, kind=self._nirc2_kind(),
+            plane=self.n2_plane.value(),
+            remote=split_remote(self.n2_path.text().strip()),
+            ifs_bin=self.n2_ifs_bin.value())
+        self._n2_worker.status.connect(self.n2_log.appendPlainText)
         self._n2_worker.frame_done.connect(self._on_nirc2_frame_done)
         self._n2_worker.frame_failed.connect(self._on_nirc2_frame_failed)
         self._n2_worker.finished_all.connect(self._on_nirc2_finished)
@@ -1401,38 +1711,43 @@ class Nirc2StrehlTabMixin:
         numbered sequence) and summarize when it finishes -- see
         series_stats.py. Results are collected by label in
         _on_nirc2_frame_done/_failed; a later success for the same label
-        (the autofind retry) replaces an earlier failure."""
-        import os
+        (the autofind retry) replaces an earlier failure. The selected
+        frames are taken in acquisition order (modification time, then
+        name), whatever the list's order; the Plane setting applies to
+        every frame (labels '<frame> p<plane>')."""
+        self._nirc2_play_stop()
         if not self.n2_autofind.isChecked():
             self.n2_log.appendPlainText(
                 "! Series stats needs AUTOFIND on (each frame's brightest "
                 "star)")
             return
         path = self._nirc2_frames_dir()
+        role = QtCore.Qt.ItemDataRole.UserRole
         items = sorted(self.n2_files.selectedItems(),
-                       key=self.n2_files.row)
+                       key=lambda it: _chronological(
+                           (it.data(role) or it.text(), it.data(_MTIME_ROLE))))
         if items:
-            req = [(os.path.splitext(it.text())[0], os.path.join(
-                path, it.data(QtCore.Qt.ItemDataRole.UserRole) or it.text()))
-                for it in items]
+            req = [(self._nirc2_frame_key(os.path.splitext(it.text())[0]),
+                    os.path.join(path, it.data(role) or it.text()))
+                   for it in items]
         else:
             first = self.n2_im1.value()
-            req = [(self._nirc2_numbered_name(no), os.path.join(
-                path, self._nirc2_numbered_name(no) + ".fits"))
-                for no in range(first, first + self.n2_nim.value())]
+            req = [(self._nirc2_frame_key(no), self._nirc2_frame_path(no))
+                   for no in range(first, first + self.n2_nim.value())]
         # frames already measured AND logged are taken from the log
         # (Eduardo 2026-10-06), only the rest is measured
         logged = getattr(self, "_n2_logged_results", {})
+        plane = self.n2_plane.value()   # the worker labels '<frame> p<plane>'
         self._n2_series = {}
-        self._n2_series_order = [lab for lab, _fp in req]
+        self._n2_series_order = [plane_label(lab, plane) for lab, _fp in req]
         self._n2_series_from_log = 0
         todo = []
         for lab, fp in req:
-            r = logged.get((path, lab))
+            r = logged.get((path, plane_label(lab, plane)))
             if r is None:
                 todo.append((lab, fp))
             else:
-                self._n2_series[lab] = r
+                self._n2_series[plane_label(lab, plane)] = r
                 self._n2_series_from_log += 1
         if not todo:
             self._nirc2_series_finish()
@@ -1445,11 +1760,31 @@ class Nirc2StrehlTabMixin:
         self._n2_loaded_files = todo[-1:]
 
     def _nirc2_frame_key(self, imno):
-        """The log/series key of a frame: numbered GO! labels frames by
-        number -- as the STRING "7" (the worker's str(no)) -- a file run by
-        name (n0007); both mean <PREFIX>0007."""
-        s = str(imno)
-        return self._nirc2_numbered_name(s) if s.isdigit() else s
+        """The log/series key of a frame: its file stem. A numbered GO!
+        labels frames by number -- the STRING "7" (the worker's str(no)),
+        "7 p12" for a plane -- which becomes <PREFIX>0007 (an OSIRIS IFU
+        cube's _<filter>_<scale> matched in PATH); a file label stays."""
+        text = str(imno)
+        base, sep, plane = text.rpartition(" p")
+        if sep and plane.isdigit() and base.isdigit():      # "7 p12"
+            return plane_label(self._nirc2_frame_key(base), int(plane))
+        if text.isdigit():
+            return os.path.splitext(os.path.basename(
+                self._nirc2_frame_path(int(text))))[0].replace("*", "")
+        return text
+
+    def _nirc2_frame_path(self, no):
+        """The numbered frame <frames dir>/<PREFIX><number><suffix>.fits; a
+        `*` in the suffix (OSIRIS IFU cubes' _<filter>_<scale>) is matched
+        in the directory (the first match), as the worker does."""
+        import glob
+        full = os.path.join(self._nirc2_frames_dir(),
+                            self._nirc2_numbered_name(no) + ".fits")
+        if "*" in full:
+            found = sorted(glob.glob(full))
+            if found:
+                return found[0]
+        return full
 
     def _nirc2_series_finish(self):
         """Summarize the collected series: one line in the log and a small
@@ -1529,6 +1864,28 @@ class Nirc2StrehlTabMixin:
         self._nirc2_series_record(str(imno), result)
         self._n2_frame_failed = False
         self._n2_header = header       # AO keywords for the TT-star odometer
+        # what the plane controls step through for this frame, and what a
+        # click on it measures against (the worker's extras; in sync with
+        # PyAO's strehl_tool)
+        worker = self.sender()
+        self._n2_shown_path = getattr(worker, "paths", {}).get(
+            imno, self._n2_shown_path)
+        extra = getattr(worker, "extras", {}).get(imno) or {}
+        if "planes" in extra:
+            self._nirc2_set_plane_range(extra["planes"],
+                                        extra.get("kind", "cube"))
+        else:
+            naxis = int(header.get("NAXIS", 0)) if header is not None else 0
+            self._nirc2_set_plane_range(
+                int(header.get("NAXIS3", 1)) if naxis == 3 else 0)
+        self._n2_ifs_valid = extra.get("valid")
+        self._n2_plane_note = extra.get("note", "")
+        self._n2_orp_kind = extra.get("orp_kind", "")
+        if extra.get("orp") and self._n2_shown_path != self._n2_orp_logged:
+            self.n2_log.appendPlainText(f"  {extra['orp']}")
+            self._n2_orp_logged = self._n2_shown_path
+        self._n2_coadd_frame = extra.get("frame")
+        self._n2_coadd_n = int(extra.get("coadds", 0) or 0)
         if reduced is not self._n2_image:
             self._n2_field = []        # the map belongs to ONE frame
             self._n2_field_dropped = []     # else stale × markers persist
@@ -1566,12 +1923,12 @@ class Nirc2StrehlTabMixin:
         `failure` (Eduardo 2026-10-06): a measurement that FAILED still
         shows its frame, titled with the reason, so the image can be
         inspected and a star clicked by hand."""
-        self._n2_pick_locked = False
         prompt = ("CLICK ON THE STAR" if failure is None
                   else "measurement failed — click a star to measure")
         self._n2_last_draw = (
             f"Image {self._n2_imno} — {self._nirc2_mode_text(params)}"
-            f" — {prompt}", None)
+            + (f" — {self._n2_plane_note}" if self._n2_plane_note else "")
+            + f" — {prompt}", None)
         self._nirc2_draw_main()
         for box in (self.n2_strehl_out, self.n2_fwhm_out, self.n2_wfe_out,
                     self.n2_pred_sr, self.n2_pred_fwhm, self.n2_dsr,
@@ -1609,29 +1966,35 @@ class Nirc2StrehlTabMixin:
         self._nirc2_drain_pending_duplicates()
 
     def _on_nirc2_motion(self, event):
-        """AUTOFIND OFF: live magnifier while picking the star — the
-        MEASURED STAR panel follows the cursor with a crosshair, because
-        the pointer itself hides faint cores (Eduardo 2026-07-23)."""
-        if (not self._nirc2_click_measures() or self._n2_image is None
-                or self._n2_pick_locked
-                or event.xdata is None or event.ydata is None
-                or event.inaxes is None):
+        """Mouse motion over the main image. With a button held, a move
+        beyond DRAG_PX screen pixels makes the press a drag: the left or
+        middle button pans, the right one sets the colour map. Otherwise
+        the pixel readout and the PICK ZOOM follow the cursor -- the
+        MEASURED STAR panel shows the image around it with a crosshair,
+        AUTOFIND on or off (the pointer hides faint cores, Eduardo
+        2026-07-23 / 2026-10-25), until the mouse leaves the image."""
+        self._nirc2_show_cursor_value(event)
+        press = self._n2_press
+        if press is not None:
+            if press.drag is None and self._nirc2_moved(press, event):
+                press.drag = "cmap" if press.button == 3 else "pan"
+            if press.drag == "pan":
+                self._nirc2_pan_to(event)
+            elif press.drag == "cmap":
+                self._nirc2_colour_map_at(event.x, event.y)
             return
-        img = self._n2_image
-        r = 24
-        x = int(event.xdata)
-        y = int(event.ydata)
-        x0 = min(max(x - r, 0), max(img.shape[1] - 2 * r, 0))
-        y0 = min(max(y - r, 0), max(img.shape[0] - 2 * r, 0))
-        cut = img[y0:y0 + 2 * r, x0:x0 + 2 * r]
-        self.n2_fig_star.clear()
-        ax = self.n2_fig_star.add_subplot(111)
-        disp, vmin, vmax = self._nirc2_scaled(cut)
-        ax.imshow(disp, cmap="gray", origin="lower", vmin=vmin, vmax=vmax,
-                  interpolation="nearest")
-        ax.axvline(x - x0, color="yellow", lw=0.6)
-        ax.axhline(y - y0, color="yellow", lw=0.6)
-        ax.set_xticks([]); ax.set_yticks([])
+        if (event.xdata is None or event.ydata is None or event.inaxes is None
+                or event.inaxes not in self.n2_fig.axes):
+            self._nirc2_restore_star_panel()
+            return
+        x, y = int(event.xdata), int(event.ydata)
+        cut, x0, y0 = self._nirc2_zoom_cut(x, y)
+        if cut is None or not cut.size:
+            return
+        if self.n2_cap_star.text() != "PICK ZOOM":
+            self._nirc2_save_star_panel()
+        self._nirc2_thumb(self.n2_fig_star, *self._nirc2_scaled(cut),
+                          cross=(x - x0, y - y0))
         self.n2_cap_star.setText("PICK ZOOM")
         self.n2_canvas_star.draw_idle()
 
@@ -1666,15 +2029,21 @@ class Nirc2StrehlTabMixin:
             "median) — used instead of the annulus until cleared")
 
     def _on_nirc2_click(self, event):
-        """AUTOFIND OFF: re-measure the displayed frame at the clicked pixel
-        (replaces the IDL widget's 'CLICK ON THE STAR' cursor prompt).
-        With Pick sky armed, the click sets the sky patch instead."""
-        if (self.n2_pick_sky.isChecked() and self._n2_image is not None
-                and event.xdata is not None and event.inaxes is not None):
-            self._nirc2_set_sky_from(event)
+        """A left click on the image (the press of a press-release that did
+        not drag): with Pick sky armed it sets the sky patch, with 'Add
+        star by click' armed it adds the star to the field map, else it
+        measures the star there -- AUTOFIND on or off (Eduardo 2026-10-25:
+        "so that we dont have to turn off autofind and click everytime").
+        While a cube plays, a click pauses it instead (the plane shown is
+        then measured, as with Pause)."""
+        if event.xdata is None or event.ydata is None or event.inaxes is None:
             return
-        if (self._n2_image is None or event.xdata is None
-                or event.ydata is None or event.inaxes is None):
+        if self._nirc2_play_stop(measure=True):
+            return
+        if self._n2_image is None:
+            return
+        if self.n2_pick_sky.isChecked():
+            self._nirc2_set_sky_from(event)
             return
         if self.n2_add_star.isChecked():
             result = self._nirc2_measure_at(event.xdata, event.ydata)
@@ -1683,21 +2052,18 @@ class Nirc2StrehlTabMixin:
                 self._nirc2_add_to_field(result)
             else:
                 self.n2_log.appendPlainText(f"field: not added — {verdict}")
-            self._n2_pick_locked = True
             return
         if not self._nirc2_click_measures():
             return
         result = self._nirc2_measure_at(event.xdata, event.ydata)
-        self._n2_pick_locked = True    # zoom freezes on the measured star
         if result is not None and result.ok:
             self._n2_frame_failed = False
 
     def _nirc2_click_measures(self):
-        """A click on the image measures there with AUTOFIND off, and also
-        on a frame whose automatic measurement FAILED (it is shown with the
-        reason so a star can be picked by hand, Eduardo 2026-10-06)."""
-        return (not self.n2_autofind.isChecked()
-                or getattr(self, "_n2_frame_failed", False))
+        """A click on the image measures the star there, AUTOFIND on or
+        off (Eduardo 2026-10-25; before, only with AUTOFIND off or on a
+        frame whose automatic measurement failed)."""
+        return self._n2_image is not None
 
     def _on_nirc2_map_ext_click(self, event):
         """Field-map mirror of _on_nirc2_click's add-star branch, on the
@@ -1735,7 +2101,6 @@ class Nirc2StrehlTabMixin:
             self._nirc2_add_to_field(result)
         else:
             self.n2_log.appendPlainText(f"field: not added — {verdict}")
-        self._n2_pick_locked = True
 
     def _nirc2_add_to_field(self, result):
         """Add a manually-clicked measurement to the field map, honouring
@@ -1788,8 +2153,20 @@ class Nirc2StrehlTabMixin:
         the current photometry settings; displays and returns the result.
         Cleans only against an already-built field model -- see
         _nirc2_pick_psf_clean; the model is passed in rather than rebuilt,
-        so a click costs no more than it did before cleaning existed."""
+        so a click costs no more than it did before cleaning existed. An
+        IFU cube is measured the IFU way (osiris_ifs), a NIRC2 coadd
+        against its frame's star (nirc2_coadds)."""
+        if self._n2_ifs_valid is not None or self._n2_coadd_frame is not None:
+            result = self._nirc2_measure_plane_at(x, y)
+            self._nirc2_display(result)
+            return result
         photrad, bgin, bgout, peakrad = self._nirc2_radii()
+        if self._n2_dl is None and self._n2_params is not None:
+            # a frame shown after a failure may arrive without its DL PSF
+            p = self._n2_params
+            self._n2_dl = engine.nirc2_dl_psf(
+                p.camname, p.pmsname, p.effwave_um, p.pmrangl_deg, npix=512,
+                daytime=p.daytime, sfp=p.sfp)
         clean = self._nirc2_pick_psf_clean()
         result = engine.measure_strehl(
             self._n2_image, params=self._n2_params, pos=(x, y),
@@ -1814,6 +2191,48 @@ class Nirc2StrehlTabMixin:
                 "picks will reuse it")
         self._nirc2_display(result)
         return result
+
+    def _nirc2_measure_plane_at(self, x, y):
+        """_nirc2_measure_at for an IFU cube (model FWHM, relative SR) or a
+        NIRC2 coadd (the frame measured at the clicked star, then the
+        coadd's short-exposure SR against it); PSF-fit cleaning does not
+        apply to either."""
+        import dataclasses
+        from ... import nirc2_coadds, osiris_ifs
+        photrad, bgin, bgout, peakrad = self._nirc2_radii()
+        if self.n2_psf_clean.isChecked():
+            self.n2_log.appendPlainText(
+                f"  {self._nirc2_psf_clean_tag()} skipped — not for an IFU "
+                "cube or a single coadd")
+        if self._n2_dl is None and self._n2_params is not None:
+            p = self._n2_params
+            self._n2_dl = (osiris_ifs.ifs_dl_psf(p)
+                           if self._n2_ifs_valid is not None else
+                           engine.nirc2_dl_psf(
+                               p.camname, p.pmsname, p.effwave_um,
+                               p.pmrangl_deg, npix=512, daytime=p.daytime,
+                               sfp=p.sfp))
+        if self._n2_ifs_valid is not None:
+            return osiris_ifs.measure_ifs(
+                self._n2_image, self._n2_ifs_valid, self._n2_params,
+                pos=(x, y), photometry_radius_arcsec=photrad,
+                bg_inner_arcsec=bgin, bg_outer_arcsec=bgout,
+                peak_radius_arcsec=peakrad, dl_psf=self._n2_dl,
+                idl_version=self._nirc2_idl_version())
+        kwargs = dict(photometry_radius_arcsec=photrad, bg_inner_arcsec=bgin,
+                      bg_outer_arcsec=bgout, peak_radius_arcsec=peakrad,
+                      dl_psf=self._n2_dl,
+                      robust_sky=self.n2_robust_sky.isChecked(),
+                      sky_override=self._n2_sky_override,
+                      idl_version=self._nirc2_idl_version(),
+                      background_subtracted=self._n2_bg_used)
+        n = max(self._n2_coadd_n, 1)
+        frame_res = engine.measure_strehl(
+            self._n2_coadd_frame,
+            params=dataclasses.replace(self._n2_params, coadds=n),
+            pos=(x, y), auto_radius=self.n2_auto_rad.isChecked(), **kwargs)
+        return nirc2_coadds.measure_coadd(self._n2_image, frame_res, n,
+                                          **kwargs)
 
     def _nirc2_idl_version(self):
         """The IDL Strehl-tool version selected ("2026-10" or "legacy")."""
@@ -1895,10 +2314,16 @@ class Nirc2StrehlTabMixin:
         if getattr(self, "_n2_field_busy", False):
             self._nirc2_cancel_field_measure()
             return
+        self._nirc2_play_stop()     # the field is measured on the measured frame
         if self._n2_image is None or self._n2_params is None:
             self.n2_log.appendPlainText(
                 "! measure a frame first — the field map works on the "
                 "displayed image")
+            return
+        if self._n2_ifs_valid is not None or self._n2_coadd_frame is not None:
+            self.n2_log.appendPlainText(
+                "! Measure field works on whole frames: not on an IFU cube, "
+                "nor on one coadd (set Plane to 'sum')")
             return
         photrad_px = (self.n2_photrad.value() * 1000.0
                       / self._n2_params.plate_scale_mas)
@@ -2593,7 +3018,8 @@ class Nirc2StrehlTabMixin:
     # original string so an actual filename label still renders instead of
     # erroring.
     _CSV_TEXT_COLS = {"time_utc", "target_name", "ao_mode", "guide_star",
-                      "guide_mag_src", "ra", "dec", "filter"}
+                      "guide_mag_src", "ra", "dec", "filter", "sky_mode",
+                      "flags"}
 
     # Nothing in this log is meaningful past 3 decimal places (Eduardo
     # 2026-07-28) -- SR to 0.001, FWHM/pixel/Az/El well past their real
@@ -3276,19 +3702,24 @@ class Nirc2StrehlTabMixin:
                     "on the Target tab; resolve/enter coordinates there")
 
     # ---- display ------------------------------------------------------------
-    def _nirc2_scaled(self, img):
+    def _nirc2_scaled(self, img, ref=None):
         """Display scaling for the main view and the pick-zoom magnifier:
         (array, vmin, vmax) per the Stretch combo. Display-only — the
         measurement never sees this. 'IDL ±5σ' is the summit tool's fixed
         linear window; the others clip black at the 0.5th percentile and
-        set white at the White-point percentile, with nonlinear transfer
-        curves for hunting faint objects."""
+        set white at the White-point percentile (of a strided subsample of
+        at most ~LIMIT_SAMPLES pixels), with nonlinear transfer curves for
+        hunting faint objects. `ref` (a playing plane's whole plane) sets
+        the limits instead of `img`, so the part of a plane on view plays
+        in the stretch the whole plane has when measured."""
         mode = self.n2_stretch.currentText()
+        src = img if ref is None else ref
         if mode == "IDL ±5σ":
-            av, sd = float(img.mean()), float(img.std())
+            av, sd = float(np.mean(src)), float(np.std(src))
             return img, av - 5 * sd, av + 5 * sd
-        lo = float(np.percentile(img, 0.5))
-        hi = float(np.percentile(img, self.n2_white.value()))
+        sample = _subsample(np.asarray(src), LIMIT_SAMPLES)
+        lo = float(np.percentile(sample, 0.5))
+        hi = float(np.percentile(sample, self.n2_white.value()))
         if hi <= lo:
             hi = lo + 1.0
         if mode == "linear %":
@@ -3384,22 +3815,35 @@ class Nirc2StrehlTabMixin:
                 f"{c['dsep_arcsec']:+.2f}″)")
 
     def _on_nirc2_stretch(self, *_):
+        """A new stretch (the combo, White, or the right-click menu): draw
+        the image on display with it (the playing plane while a cube
+        plays)."""
         self.n2_white.setEnabled(self.n2_stretch.currentText() != "IDL ±5σ")
-        if self._n2_image is not None and self._n2_last_draw is not None:
+        if self._nirc2_is_playing():
+            if self._n2_play_plane is not None:
+                self._nirc2_draw_play()
+        elif self._n2_image is not None and self._n2_last_draw is not None:
             self._nirc2_draw_main()
 
     def _nirc2_draw_main(self):
         """Redraw the main view from the stored frame + last draw state
         (title text, measured result for the aperture circles) with the
-        current stretch — called by display, the pick view, and any
-        stretch-control change."""
+        current stretch and colour map, in the kept zoom when the frame
+        has the zoomed image's shape -- called by display, the pick view,
+        and any stretch-control change."""
         title, result = self._n2_last_draw
         img = self._n2_image
         self.n2_fig.clear()
         ax = self.n2_fig.add_subplot(111)
         disp, vmin, vmax = self._nirc2_scaled(img)
-        ax.imshow(disp, cmap="gray", origin="lower", vmin=vmin, vmax=vmax,
-                  interpolation="nearest")
+        self._n2_clim_base = (vmin, vmax)
+        lo, hi = self._nirc2_clim(vmin, vmax)
+        # resampling the data before the colour map (identical for
+        # nearest) keeps a 2048^2 redraw -- a right-drag -- fast
+        self._n2_main_im = ax.imshow(disp, cmap="gray", origin="lower",
+                                     vmin=lo, vmax=hi,
+                                     interpolation="nearest",
+                                     interpolation_stage="data")
         if result is not None:
             ps = result.params.plate_scale_mas
             th = np.linspace(0, 2 * np.pi, 121)
@@ -3411,6 +3855,7 @@ class Nirc2StrehlTabMixin:
                 ax.plot(result.x + r_px * np.cos(th),
                         result.y + r_px * np.sin(th),
                         style, color="white", lw=0.8)
+        self._nirc2_apply_view(ax, img.shape)   # after the circles
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_title(title, fontsize=9)
         self.n2_canvas.draw_idle()
@@ -3431,7 +3876,9 @@ class Nirc2StrehlTabMixin:
         # re-render this exact state later
         self._n2_last_draw = (
             f"Image {self._n2_imno} — "
-            f"{self._nirc2_mode_text(result.params)}", result)
+            f"{self._nirc2_mode_text(result.params)} — "
+            f"{self._nirc2_wave_text(result.params)}"
+            + (" — PCU source" if result.params.daytime else ""), result)
         self._nirc2_draw_main()
         # warnings live UNDER the cutouts (Eduardo 2026-07-23), symptom
         # first, then cause: out-of-(0,1] SR is impossible, and annulus
@@ -3455,6 +3902,12 @@ class Nirc2StrehlTabMixin:
             # measurement is not refused). Full sentence goes to the log
             # (_nirc2_log_psf_clean); this is the at-a-glance tag.
             tags.append(f"PSF-CLEAN ABOVE VALIDATED SR (>{engine.PSF_FIT_SR_VALIDATED_MAX:.2f})")
+        if result.mode == "ifs":
+            tags.append(self._nirc2_ifs_tag(result))
+        elif result.mode == "coadd":
+            tags.append("COADD: short-exposure SR = its peak ÷ (frame flux / N)")
+        if result.note:
+            tags.append(result.note)
         set_cue(self.n2_warn,
                 "err" if (result.saturated or result.unphysical) else "warn")
         self.n2_warn.setText(" · ".join(tags))
@@ -3485,14 +3938,28 @@ class Nirc2StrehlTabMixin:
         # two aligned lines per measurement, echoing the readout rows
         # (Eduardo 2026-07-23); the full comparison sentence lives in the
         # predicted boxes' tooltip
-        cmp_res = self._nirc2_compare(result)
+        # an IFU SR is relative and a coadd's is short-exposure: neither is
+        # the long-exposure SR the estimator predicts
+        cmp_res = (None if result.mode in ("ifs", "coadd")
+                   else self._nirc2_compare(result))
         self._nirc2_show_compare(cmp_res)
         self.n2_log.appendPlainText(
             f"Image {self._n2_imno}  SR {result.strehl:.3f} "
             f"±{result.sr_err:.3f}  "
             f"FWHM {result.fwhm_mas:7.2f} mas  WFE {result.wfe_nm:6.1f} nm  "
             f"pos {result.x:6.1f} {result.y:6.1f}"
-            + ("  [IDL legacy]" if result.idl_version == "legacy" else ""))
+            + ("  [IDL legacy]" if result.idl_version == "legacy" else "")
+            + (f"  [IFU {result.params.effwave_um:.4f} µm: FWHM "
+               f"{self._nirc2_fwhm_ratio(result):.2f}× DL "
+               f"{result.fwhm_dl_mas:.1f} mas; SR relative, "
+               f"r={result.photrad_used_arcsec:.2f}″]"
+               if result.mode == "ifs" else "")
+            + ("  [coadd: frame flux / N]" if result.mode == "coadd" else ""))
+        if result.mode in ("ifs", "coadd"):
+            self.n2_log.appendPlainText(
+                "predicted: not compared — "
+                + ("an IFU SR is relative" if result.mode == "ifs"
+                   else "a coadd's SR is short-exposure"))
         if cmp_res is not None:
             if cmp_res["s_conv"] is None:
                 self.n2_log.appendPlainText(f"predicted: {cmp_res['text']}")
@@ -3526,6 +3993,31 @@ class Nirc2StrehlTabMixin:
             self._on_target_selected(idx)
             self.n2_log.appendPlainText(
                 f"target set from list: {self._targets[idx]['name']}")
+
+    def _nirc2_wave_text(self, params):
+        """The title's wavelength: an IFU plane's central wavelength and
+        channels (its note), else the frame's wavelength, with a NIRC2
+        coadd's number."""
+        note = self._n2_plane_note
+        if self._n2_ifs_valid is not None and note:
+            return note
+        text = f"{params.effwave_um:.3f} µm"
+        return f"{note} — {text}" if note else text
+
+    @staticmethod
+    def _nirc2_fwhm_ratio(result):
+        """FWHM over the diffraction-limited FWHM it is compared with (nan
+        when there is none)."""
+        return (result.fwhm_mas / result.fwhm_dl_mas
+                if result.fwhm_dl_mas > 0 else float("nan"))
+
+    def _nirc2_ifs_tag(self, result):
+        """The warning-line text of an IFU measurement: FWHM against the
+        diffraction limit, and what the SR is."""
+        return (f"IFU: FWHM {self._nirc2_fwhm_ratio(result):.2f}× DL "
+                f"({result.fwhm_dl_mas:.1f} mas at "
+                f"{result.params.effwave_um:.3f} µm, model fit) · SR "
+                f"RELATIVE (r {result.photrad_used_arcsec:.2f}″)")
 
     def _nirc2_seeing_at(self, t_hst):
         """Nearest-sample DIMM/MASS seeing (arcsec, 500 nm, zenith) to
@@ -3585,6 +4077,9 @@ class Nirc2StrehlTabMixin:
         row["pixel_x"] = float(result.x)
         row["pixel_y"] = float(result.y)
         row["filter"] = p.filter_name
+        row["effwave_um"] = p.effwave_um
+        row["sky_mode"] = result.sky_mode
+        row["flags"] = self._nirc2_csv_flags(result)
         row["az_deg"] = p.az_deg
         row["el_deg"] = p.el_deg
         row["airmass"] = p.airmass
@@ -3618,6 +4113,29 @@ class Nirc2StrehlTabMixin:
             except Exception:
                 pass
         return row
+
+    def _nirc2_csv_flags(self, result):
+        """The row's Flags: the measurement's warnings, and for an IFU cube
+        or a coadd what its SR and FWHM are (the columns stay as they are;
+        the session journal is append-only). In sync with PyAO."""
+        flags = [n for n, on in (("saturated", result.saturated),
+                                 ("unphysical", result.unphysical),
+                                 ("crowded", result.crowded),
+                                 ("edge", result.edge),
+                                 ("psf-cleaned", result.cleaned)) if on]
+        if result.mode == "ifs":
+            flags += ["ifs-relative-sr",
+                      f"fwhm/dl={self._nirc2_fwhm_ratio(result):.3f}",
+                      f"dl={result.fwhm_dl_mas:.2f}mas"]
+            if self._n2_orp_kind:
+                flags.append(f"orp-{self._n2_orp_kind}")
+            if "negative image" in result.note:
+                flags.append("negative-image-masked")
+        elif result.mode == "coadd":
+            flags.append("coadd-short-exposure-sr")
+        if result.params.daytime:
+            flags.append("pcu-source")
+        return ",".join(flags)
 
     @staticmethod
     def _nirc2_tt_offset_evidence(p, header):
@@ -4405,3 +4923,739 @@ class Nirc2StrehlTabMixin:
             self._nirc2_apply_dup_policy(policy, row, dupes)
         if self._n2_csv_table is not None:
             self._nirc2_fill_csv_table(self._n2_csv_table)
+
+    # ---- image viewer: planes, playback, zoom/pan, readout (PyAO sync) ----
+    def _nirc2_init_viewer(self):
+        """State and timers of the image viewer (in sync with PyAO's
+        strehl_tool): the plane on display and what it steps through, cube
+        playback, the kept zoom, the mouse press, the colour map, the
+        remote frame listing and the OSIRIS IFU raw-frame check."""
+        self._n2_shown_path = None      # local file of the frame on display
+        self._n2_remote_list_worker = None
+        self._n2_remote_list_timer = QtCore.QTimer(self)    # one per edit
+        self._n2_remote_list_timer.setSingleShot(True)
+        self._n2_remote_list_timer.setInterval(600)
+        self._n2_remote_list_timer.timeout.connect(
+            self._nirc2_start_remote_list)
+        self._n2_plane_timer = QtCore.QTimer(self)  # one re-measure per step
+        self._n2_plane_timer.setSingleShot(True)
+        self._n2_plane_timer.setInterval(150)
+        self._n2_plane_timer.timeout.connect(self._nirc2_measure_plane)
+        # main-image zoom: (image shape, xlim, ylim) kept across redraws of
+        # images of that shape; None = the whole frame
+        self._n2_view = None
+        self._n2_main_shape = None
+        self._n2_main_im = None
+        self._n2_clim_base = None   # the stretch's (vmin, vmax) of the image
+        self._n2_press = None       # a press: click, pan or colour-map drag
+        self._n2_bias, self._n2_contrast = BIAS_DEFAULT, CONTRAST_DEFAULT
+        self._n2_star_rest = None   # MEASURED STAR panel under the hover zoom
+        # what Plane steps through (planes.py): "cube" planes, NIRC2
+        # "coadd"s or an OSIRIS IFU cube's wavelength bins ("ifs"); an IFU
+        # cube's valid spaxels and a coadd's frame + coadd count, for a
+        # click to measure there
+        self._n2_plane_kind = "cube"
+        self._n2_plane_note = ""    # title note (IFU: its central wavelength)
+        self._n2_orp_kind = ""      # what the ORP subtracted from the cube
+        self._n2_orp_logged = None
+        self._n2_ifs_valid = None
+        self._n2_coadd_frame = None
+        self._n2_coadd_n = 0
+        # OSIRIS IFU auto-measure: the night's SPEC/raw is also checked for
+        # frames the online pipeline gave no cube (osiris_orp)
+        self._n2_orp_timer = QtCore.QTimer(self)
+        self._n2_orp_timer.setInterval(ORP_CHECK_MS)
+        self._n2_orp_timer.timeout.connect(self._nirc2_orp_check)
+        self._n2_orp_worker = None
+        self._n2_orp_path = None
+        self._n2_orp_reported = set()
+        self._n2_orp_drf_cache = {}
+        self._n2_orp_last_error = None
+        # cube playback (display only): the open plane source, the next
+        # plane (1-based), its plane count and shape, the drawn part, its
+        # extent in frame pixels and the drawn image
+        self._n2_play_src = None
+        self._n2_play_full = None   # the whole played plane (coadds, IFU)
+        self._n2_play_cal = {}      # instrument key -> (flat, mask)
+        self._n2_play_next = 0
+        self._n2_play_n = 0
+        self._n2_play_shape = None
+        self._n2_play_plane = None
+        self._n2_play_extent = None
+        self._n2_play_im = None
+        self._n2_play_frozen = False
+        self._n2_play_timer = QtCore.QTimer(self)   # re-armed per plane
+        self._n2_play_timer.setSingleShot(True)
+        self._n2_play_timer.timeout.connect(self._nirc2_play_tick)
+        self.n2_stretch_menu = self._nirc2_build_stretch_menu()
+        self._nirc2_set_plane_range(0)
+
+    def _nirc2_shutdown(self):
+        """The window closes: stop playback (without measuring) and the
+        viewer's timers; the threads are stopped by closeEvent."""
+        if getattr(self, "_n2_play_timer", None) is None:
+            return
+        self._nirc2_play_stop()
+        for t in (self._n2_plane_timer, self._n2_orp_timer,
+                  self._n2_remote_list_timer):
+            t.stop()
+        self._n2_orp_path = None
+
+    # ---- planes
+    def _nirc2_set_plane_range(self, planes, kind="cube"):
+        """Let Plane run over 0 ('mean' of a cube, the 'sum' of a NIRC2
+        frame's coadds, 'all λ' of an IFU cube) and planes 1..`planes` of
+        the frame on display; it and the playback controls are off for a
+        single frame; for an IFU cube 'λ bin' takes the slider's place."""
+        planes = max(int(planes), 0)
+        self._n2_plane_kind = kind
+        self.n2_plane.setSpecialValueText(PLANE_ZERO_TEXT.get(kind, "mean"))
+        for w in (self.n2_plane, self.n2_plane_slider):
+            w.blockSignals(True)
+            w.setMaximum(planes)
+            w.blockSignals(False)
+        self.n2_plane_slider.blockSignals(True)
+        self.n2_plane_slider.setValue(self.n2_plane.value())
+        self.n2_plane_slider.blockSignals(False)
+        for w in (self.n2_plane, self.n2_plane_slider, self.n2_play,
+                  self.n2_fps, self.n2_loop):
+            w.setEnabled(planes > 1)
+        self.n2_plane_slider.setVisible(kind != "ifs")
+        self.n2_ifs_bin.setVisible(kind == "ifs")
+
+    def _nirc2_set_plane(self, plane):
+        """Set Plane without re-measuring."""
+        self._n2_plane_timer.stop()
+        for w in (self.n2_plane, self.n2_plane_slider):
+            w.blockSignals(True)
+            w.setValue(int(plane))
+            w.blockSignals(False)
+
+    def _on_nirc2_ifs_bin_changed(self, width):
+        """A new 'λ bin': re-measure the IFU cube on display (Plane kept
+        where the new bins allow)."""
+        if (self._n2_plane_kind != "ifs" or self._n2_shown_path is None
+                or self._nirc2_is_playing()):
+            return
+        hdr = getattr(self, "_n2_header", None)
+        if hdr is not None and hdr.get("NAXIS1"):
+            from ...osiris_ifs import channel_bins
+            n = len(channel_bins(int(hdr["NAXIS1"]), width))
+            if self.n2_plane.value() > n:
+                self._nirc2_set_plane(n)
+        self._n2_plane_timer.start()
+
+    def _on_nirc2_plane_changed(self, plane):
+        """A new Plane: re-measure the frame on display (after a short
+        pause, so a scroll is one measurement); while the cube plays,
+        playback jumps to that plane instead."""
+        if self._nirc2_is_playing():
+            if plane > 0:
+                self._n2_play_next = int(plane)
+                self._n2_play_timer.start(0)
+            return
+        if self._n2_shown_path is not None:
+            self._n2_plane_timer.start()
+
+    def _nirc2_measure_plane(self):
+        """Measure the selected plane of the frame on display (waits while
+        a measurement runs)."""
+        if self._n2_worker is not None and self._n2_worker.isRunning():
+            self._n2_plane_timer.start()
+            return
+        path = self._n2_shown_path
+        if path is None or not os.path.isfile(path):
+            return
+        self._nirc2_start(files=[(os.path.splitext(os.path.basename(path))[0],
+                                  path)])
+
+    # ---- playback
+    def _nirc2_is_playing(self):
+        return getattr(self, "_n2_play_src", None) is not None
+
+    def _nirc2_set_play_button(self, playing):
+        """Show Play/Pause as playing or not without its toggled handler."""
+        self.n2_play.blockSignals(True)
+        self.n2_play.setChecked(playing)
+        self.n2_play.blockSignals(False)
+        self.n2_play.setText(PAUSE_TEXT if playing else PLAY_TEXT)
+
+    def _on_nirc2_play_toggled(self, on):
+        """Play/Pause: start playing the cube on display, or pause and
+        measure the plane shown."""
+        if on:
+            self._nirc2_play_start()
+        else:
+            self._nirc2_play_stop(measure=True)
+
+    def _nirc2_play_start(self):
+        """Open the planes of the frame on display (planes.py: a cube
+        memory-mapped, each tick reading the part of one plane on view; a
+        NIRC2 frame's coadds from its _unp file; an IFU cube's wavelength
+        bins) and play from plane 1, or after the plane shown; refused
+        while a measurement runs."""
+        path = self._n2_shown_path
+        if self._nirc2_watch_busy() or (self._n2_worker is not None
+                                        and self._n2_worker.isRunning()):
+            self.n2_log.appendPlainText(
+                "! playback: wait for the measurement to finish")
+            self._nirc2_set_play_button(False)
+            return
+        shape = self._n2_image.shape if self._n2_image is not None else None
+        try:
+            src = open_planes(self._n2_plane_kind, path, shape=shape,
+                              width=self.n2_ifs_bin.value(),
+                              n=self._n2_coadd_n or None,
+                              calibration=self._nirc2_play_calibration())
+        except Exception as e:
+            self.n2_log.appendPlainText(
+                f"! playback: cannot play {os.path.basename(str(path))} "
+                f"({type(e).__name__}: {e})")
+            self._nirc2_set_play_button(False)
+            return
+        self._n2_plane_timer.stop()
+        self._n2_play_src, self._n2_play_n = src, src.n
+        self._n2_play_shape = tuple(src.shape)
+        plane = self.n2_plane.value()
+        self._n2_play_next = plane + 1 if 0 < plane < self._n2_play_n else 1
+        self._n2_play_im = None
+        self._nirc2_set_play_button(True)
+        self._n2_play_timer.start(0)
+
+    def _nirc2_play_calibration(self):
+        """(flat, mask) of the frame on display's instrument, so played
+        NIRC2 coadds are drawn as measured ones (loaded once per
+        instrument; None when it has none or it cannot be read)."""
+        hdr = getattr(self, "_n2_header", None)
+        if self._n2_plane_kind != "coadd" or hdr is None:
+            return None
+        from ...instruments import identify
+        inst = identify(hdr)
+        if inst is None:
+            return None
+        if inst.key not in self._n2_play_cal:
+            try:
+                self._n2_play_cal[inst.key] = inst.calibration()
+            except Exception as e:
+                self.n2_log.appendPlainText(
+                    f"! playback: {inst.name} calibration unavailable "
+                    f"({type(e).__name__}: {e}) -- coadds are played "
+                    "without the flat and bad-pixel fill")
+                self._n2_play_cal[inst.key] = None
+        return self._n2_play_cal[inst.key]
+
+    def _nirc2_play_window(self):
+        """(y0, y1, x0, x1, f): the frame pixels of the view on display
+        plus PLAY_MARGIN of it on each side, and the block size f that
+        averages them to about the screen resolution (on a grid fixed to
+        the frame, so a pan does not shimmer)."""
+        ny, nx = self._n2_play_shape
+        if self._n2_view is not None and self._n2_view[0] == self._n2_play_shape:
+            (vx0, vx1), (vy0, vy1) = self._n2_view[1], self._n2_view[2]
+        else:
+            (vx0, vx1), (vy0, vy1) = _full_view(self._n2_play_shape)
+        box = (self.n2_fig.axes[0].bbox if self.n2_fig.axes
+               else self.n2_fig.bbox)
+        f = max(1, int(min((vx1 - vx0) / max(box.width, 1.0),
+                           (vy1 - vy0) / max(box.height, 1.0))))
+        mx, my = PLAY_MARGIN * (vx1 - vx0), PLAY_MARGIN * (vy1 - vy0)
+        x0 = max(int(np.floor(vx0 + 0.5 - mx)), 0) // f * f
+        y0 = max(int(np.floor(vy0 + 0.5 - my)), 0) // f * f
+        x1 = min(int(np.ceil(vx1 + 0.5 + mx)), nx)
+        y1 = min(int(np.ceil(vy1 + 0.5 + my)), ny)
+        if min(x1 - x0, y1 - y0) < f:
+            f = 1
+        return y0, y1, x0, x1, f
+
+    def _nirc2_play_read(self, k):
+        """Plane `k` of the playing cube for display: the part on view. A
+        cube plane is read alone, block-averaged to about screen
+        resolution, minus a robust background, WITHOUT the measurement's
+        reduction. A NIRC2 coadd or an IFU bin comes from the whole plane
+        as its measurement is drawn (planes.py `full`), at full resolution,
+        and that plane sets the display limits, so it plays in the stretch
+        it has when measured. Returns (image, extent, whole plane or
+        None)."""
+        y0, y1, x0, x1, f = self._nirc2_play_window()
+        full = self._n2_play_src.full(k)
+        if full is None:
+            img = _block_mean(self._n2_play_src.window(k, y0, y1, x0, x1), f)
+            img -= np.median(_subsample(img, 4096))
+        else:
+            f = 1
+            img = np.array(full[y0:y1, x0:x1], dtype=float)
+        ny, nx = img.shape
+        return img, (x0 - 0.5, x0 + nx * f - 0.5, y0 - 0.5,
+                     y0 + ny * f - 0.5), full
+
+    def _nirc2_play_tick(self):
+        """Show the next plane of the playing cube (display only), then arm
+        the timer for the next one at the chosen rate; with Loop off the
+        last plane ends playback and is measured."""
+        if self._n2_play_src is None:
+            return
+        t0 = time.monotonic()
+        k, n = self._n2_play_next, self._n2_play_n
+        try:
+            (self._n2_play_plane, self._n2_play_extent,
+             self._n2_play_full) = self._nirc2_play_read(k)
+        except Exception as e:
+            self.n2_log.appendPlainText(
+                f"! playback stopped: plane {k} of "
+                f"{os.path.basename(self._n2_shown_path)} unreadable "
+                f"({type(e).__name__}: {e})")
+            self._nirc2_play_stop()
+            return
+        self._nirc2_set_plane(k)            # Plane follows, without measuring
+        self._nirc2_draw_play()
+        if k >= n and not self.n2_loop.isChecked():
+            self._nirc2_play_stop(measure=True)
+            return
+        self._n2_play_next = k % n + 1
+        left = 1.0 / self.n2_fps.value() - (time.monotonic() - t0)
+        self._n2_play_timer.start(max(0, int(round(1000.0 * left))))
+
+    def _nirc2_draw_play(self):
+        """Draw the playing plane with the display stretch, in the current
+        view and without overlays: the first plane builds the axes, later
+        ones only replace the pixels, extent and limits (the layout engine
+        is off from the second plane until playback ends)."""
+        data, extent = self._n2_play_plane, self._n2_play_extent
+        disp, vmin, vmax = self._nirc2_scaled(data, ref=self._n2_play_full)
+        self._n2_clim_base = (vmin, vmax)
+        lo, hi = self._nirc2_clim(vmin, vmax)
+        im = self._n2_play_im
+        if im is None or im.axes not in self.n2_fig.axes:
+            self.n2_fig.set_layout_engine("constrained")
+            self.n2_fig.clear()
+            ax = self.n2_fig.add_subplot(111)
+            im = ax.imshow(disp, cmap="gray", origin="lower", vmin=lo,
+                           vmax=hi, extent=extent, interpolation="nearest",
+                           interpolation_stage="data")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self._nirc2_apply_view(ax, self._n2_play_shape)
+            self._n2_play_im = im
+            self._n2_play_frozen = False
+        else:
+            if not self._n2_play_frozen:
+                self.n2_fig.set_layout_engine("none")
+                self._n2_play_frozen = True
+            im.set_data(disp)
+            im.set_extent(extent)
+            im.set_clim(lo, hi)
+        name = os.path.splitext(os.path.basename(self._n2_shown_path))[0]
+        im.axes.set_title(
+            f"{name} {self._n2_play_src.label(self.n2_plane.value())} — "
+            "playing (not measured)", fontsize=9)
+        self.n2_canvas.draw_idle()
+
+    def _nirc2_play_stop(self, measure=False):
+        """End playback and close the cube; True if it was playing.
+        `measure` (Pause, or the last plane with Loop off) then measures
+        the plane on display once; otherwise the measured frame is drawn
+        again."""
+        src = getattr(self, "_n2_play_src", None)
+        if src is None:
+            return False
+        self._n2_play_timer.stop()
+        self._n2_play_src = None
+        src.close()
+        self._n2_play_plane = self._n2_play_extent = None
+        self._n2_play_im = self._n2_play_full = None
+        self.n2_fig.set_layout_engine("constrained")
+        self._nirc2_set_play_button(False)
+        if measure:
+            self._nirc2_measure_plane()
+        elif self._n2_image is not None and self._n2_last_draw is not None:
+            self._nirc2_draw_main()
+        return True
+
+    # ---- OSIRIS IFU: raw frames without a cube
+    def _nirc2_orp_watch_start(self, path):
+        """With auto-measure on an OSIRIS IFU night's SPEC/ORP, check its
+        SPEC/raw every ORP_CHECK_MS for frames the online pipeline gave no
+        cube (osiris_orp); another night starts afresh."""
+        from ... import frame_watch, osiris_orp
+        remote = frame_watch.split_remote(path)
+        night = osiris_orp.night_paths(remote[1] if remote else path)
+        if not self._nirc2_inst().is_ifs or night is None:
+            self._n2_orp_timer.stop()
+            self._n2_orp_path = None
+            return
+        if path != self._n2_orp_path:
+            self._n2_orp_reported, self._n2_orp_drf_cache = set(), {}
+            self._n2_orp_last_error = None
+            self.n2_log.appendPlainText(
+                f"auto-measure: also checking {night[0]} every "
+                f"{ORP_CHECK_MS // 1000} s for frames the online pipeline "
+                "gives no cube (their partner's sky and darks left out)")
+        self._n2_orp_path = path
+        self._n2_orp_timer.start()
+        self._nirc2_orp_check()
+
+    def _nirc2_orp_check(self):
+        """Start one raw-frame check unless one is running."""
+        if self._n2_orp_path is None or (self._n2_orp_worker is not None
+                                         and self._n2_orp_worker.isRunning()):
+            return
+        self._n2_orp_worker = OrpGapWorker(
+            self._n2_orp_path, self._n2_orp_reported, self._n2_orp_drf_cache,
+            parent=self)
+        self._n2_orp_worker.done.connect(self._on_nirc2_orp_gaps)
+        self._n2_orp_worker.failed.connect(self._on_nirc2_orp_failed)
+        self._n2_orp_worker.start()
+
+    def _on_nirc2_orp_gaps(self, missing):
+        """Log raw frames found without a cube (consecutive frames with one
+        reason on one line), once each."""
+        from ... import osiris_orp
+        if self._n2_orp_path is None:
+            return
+        missing = [(f, r) for f, r in missing
+                   if f not in self._n2_orp_reported]
+        for line in osiris_orp.group_missing(missing):
+            self.n2_log.appendPlainText(f"! ORP: no cube for {line}")
+        self._n2_orp_reported.update(f for f, _r in missing)
+        self._n2_orp_last_error = None
+
+    def _on_nirc2_orp_failed(self, message):
+        """Log a raw-frame check that could not run (once per message)."""
+        if message != self._n2_orp_last_error:
+            self.n2_log.appendPlainText(f"! ORP check: {message}")
+            self._n2_orp_last_error = message
+
+    # ---- mouse: press / drag / release, wheel zoom, pan
+    def _on_nirc2_press(self, event):
+        """A press on the main image: remember where (screen and data) and
+        the view; the motion and the release decide click or drag."""
+        if event.button not in (1, 2, 3):
+            return
+        ax = self.n2_fig.axes[0] if self.n2_fig.axes else None
+        self._n2_press = SimpleNamespace(
+            button=int(event.button), x=event.x, y=event.y,
+            xdata=event.xdata, ydata=event.ydata, inaxes=event.inaxes,
+            drag=None, ax=ax,
+            view=((ax.get_xlim(), ax.get_ylim(), ax.bbox.width,
+                   ax.bbox.height) if ax is not None else None))
+
+    def _nirc2_moved(self, press, event):
+        """True once the cursor is more than DRAG_PX screen pixels from the
+        press (a drag, not a click)."""
+        if getattr(event, "x", None) is None or getattr(event, "y", None) is None:
+            return False
+        tol = DRAG_PX * float(
+            getattr(self.n2_canvas, "device_pixel_ratio", 1.0) or 1.0)
+        return float(np.hypot(event.x - press.x, event.y - press.y)) > tol
+
+    def _on_nirc2_release(self, event):
+        """End a press. Without a drag it is a click: the left button
+        measures / picks (_on_nirc2_click) or pauses a playing cube, the
+        right button opens the stretch menu."""
+        press, self._n2_press = self._n2_press, None
+        if press is None:
+            return
+        if press.drag == "cmap":
+            self.n2_log.appendPlainText(
+                f"display: {self._nirc2_stretch_text()}")
+        if press.drag is not None:
+            return
+        if press.button == 1:
+            self._on_nirc2_click(press)
+        elif press.button == 3:
+            self._nirc2_show_stretch_menu()
+
+    def _nirc2_apply_view(self, ax, shape):
+        """The kept zoom when it was made on an image of `shape`, else the
+        whole frame (another shape drops the zoom)."""
+        shape = tuple(shape)
+        self._n2_main_shape = shape
+        if self._n2_view is not None and self._n2_view[0] == shape:
+            xlim, ylim = self._n2_view[1], self._n2_view[2]
+        else:
+            self._n2_view = None
+            xlim, ylim = _full_view(shape)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+
+    def _on_nirc2_scroll(self, event):
+        """Mouse wheel over the image: zoom in (up) or out by ZOOM_STEP per
+        step, around the cursor."""
+        if (self._n2_main_shape is None or event.inaxes is None
+                or event.xdata is None or event.ydata is None
+                or not event.step):
+            return
+        self._nirc2_zoom_at(event.xdata, event.ydata,
+                            ZOOM_STEP ** -event.step, ax=event.inaxes)
+
+    def _nirc2_zoom_at(self, x, y, scale, ax=None):
+        """Scale the view by `scale` (< 1 zooms in) about (x, y), kept
+        inside the frame and at least ZOOM_MIN_PX across."""
+        shape = self._n2_main_shape
+        if ax is None:
+            ax = self.n2_fig.axes[0] if self.n2_fig.axes else None
+        if ax is None or shape is None:
+            return
+        (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+        span = min(x1 - x0, y1 - y0)
+        if span > 0:
+            scale = max(scale, min(ZOOM_MIN_PX, min(shape)) / span)
+        self._nirc2_set_view(ax, (x - (x - x0) * scale, x + (x1 - x) * scale),
+                             (y - (y - y0) * scale, y + (y1 - y) * scale))
+
+    def _nirc2_set_view(self, ax, xlim, ylim):
+        """Show xlim x ylim, shifted back inside the frame, and keep it for
+        later images of the same shape (forgotten at the whole frame)."""
+        shape = self._n2_main_shape
+        full = _full_view(shape)
+        xlim = _clamp_span(*xlim, *full[0])
+        ylim = _clamp_span(*ylim, *full[1])
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        self._n2_view = None if (xlim, ylim) == full else (shape, xlim, ylim)
+        self.n2_canvas.draw_idle()
+
+    def _nirc2_pan_to(self, event):
+        """A left / middle drag moves the view with the cursor, measured
+        from the press (no drift)."""
+        press = self._n2_press
+        if (press.view is None or self._n2_main_shape is None
+                or press.ax not in self.n2_fig.axes
+                or getattr(event, "x", None) is None):
+            return
+        (x0, x1), (y0, y1), width, height = press.view
+        dx = (event.x - press.x) * (x1 - x0) / max(width, 1.0)
+        dy = (event.y - press.y) * (y1 - y0) / max(height, 1.0)
+        self._nirc2_set_view(press.ax, (x0 - dx, x1 - dx), (y0 - dy, y1 - dy))
+
+    def _on_nirc2_key(self, event):
+        """'f' with the image focused shows the whole frame (Fit)."""
+        if event.key in ("f", "F"):
+            self._nirc2_zoom_fit()
+
+    def _nirc2_zoom_fit(self):
+        """Show the whole frame again and forget the zoom."""
+        self._n2_view = None
+        if self._n2_main_shape is None or not self.n2_fig.axes:
+            return
+        ax = self.n2_fig.axes[0]
+        xlim, ylim = _full_view(self._n2_main_shape)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        self.n2_canvas.draw_idle()
+
+    # ---- hover: pixel readout and PICK ZOOM
+    def _nirc2_zoom_cut(self, x, y, r=24):
+        """(cut, x0, y0): the 2r x 2r pixels around (x, y) of the image on
+        display (the playing plane while a cube plays) and the corner;
+        (None, 0, 0) without an image."""
+        if self._nirc2_is_playing():
+            ny, nx = self._n2_play_shape
+            x0 = min(max(x - r, 0), max(nx - 2 * r, 0))
+            y0 = min(max(y - r, 0), max(ny - 2 * r, 0))
+            if self._n2_play_full is not None:
+                return self._n2_play_full[y0:y0 + 2 * r, x0:x0 + 2 * r], x0, y0
+            try:
+                return self._n2_play_src.window(
+                    self.n2_plane.value(), y0, min(y0 + 2 * r, ny), x0,
+                    min(x0 + 2 * r, nx)), x0, y0
+            except Exception:
+                return None, 0, 0
+        img = self._n2_image
+        if img is None:
+            return None, 0, 0
+        x0 = min(max(x - r, 0), max(img.shape[1] - 2 * r, 0))
+        y0 = min(max(y - r, 0), max(img.shape[0] - 2 * r, 0))
+        return img[y0:y0 + 2 * r, x0:x0 + 2 * r], x0, y0
+
+    @staticmethod
+    def _nirc2_thumb(fig, disp, vmin=None, vmax=None, cross=None,
+                     interpolation="nearest"):
+        """Draw an image into a thumbnail figure, with an optional yellow
+        crosshair."""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        ax.imshow(disp, cmap="gray", origin="lower", vmin=vmin, vmax=vmax,
+                  interpolation=interpolation)
+        if cross is not None:
+            ax.axvline(cross[0], color="yellow", lw=0.6)
+            ax.axhline(cross[1], color="yellow", lw=0.6)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    def _nirc2_save_star_panel(self):
+        """Keep what the MEASURED STAR panel shows before the hover zoom
+        draws over it."""
+        ims = self.n2_fig_star.axes[0].images if self.n2_fig_star.axes else []
+        if ims:
+            im = ims[0]
+            self._n2_star_rest = (self.n2_cap_star.text(),
+                                  np.array(im.get_array()), im.norm.vmin,
+                                  im.norm.vmax, im.get_interpolation())
+        else:
+            self._n2_star_rest = (self.n2_cap_star.text(), None, None, None,
+                                  None)
+
+    def _nirc2_restore_star_panel(self):
+        """Put back what the MEASURED STAR panel showed before the hover
+        zoom (when it shows the zoom)."""
+        if self.n2_cap_star.text() != "PICK ZOOM":
+            return
+        caption, data, vmin, vmax, interp = (
+            self._n2_star_rest or ("MEASURED STAR", None, None, None, None))
+        if data is None:
+            self.n2_fig_star.clear()
+        else:
+            self._nirc2_thumb(self.n2_fig_star, data, vmin, vmax,
+                              interpolation=interp)
+        self.n2_cap_star.setText(caption)
+        self.n2_canvas_star.draw_idle()
+
+    def _on_nirc2_image_leave(self, _event):
+        """The mouse left the image: hide the readout, give the MEASURED
+        STAR panel back."""
+        self.n2_cursor_label.hide()
+        self._nirc2_restore_star_panel()
+
+    def _nirc2_cursor_value(self, x, y):
+        """The value of pixel (x, y) of the image on display (the playing
+        plane's source pixel while a cube plays); None off the image."""
+        if self._nirc2_is_playing():
+            try:
+                h, w = self._n2_play_shape
+                return (self._n2_play_src.value(self.n2_plane.value(), y, x)
+                        if 0 <= y < h and 0 <= x < w else None)
+            except Exception:
+                return None
+        img = self._n2_image
+        if img is None or not (0 <= y < img.shape[0] and 0 <= x < img.shape[1]):
+            return None
+        return float(img[y, x])
+
+    def _nirc2_saturation_level(self):
+        """The value at which the pixel under the cursor is saturated, as
+        the measurement's saturation flag counts it: the per-coadd ceiling
+        times the coadds (one plane or coadd while playing); None when the
+        instrument has none (OSIRIS)."""
+        p = self._n2_params
+        if p is None or not np.isfinite(getattr(p, "max_counts", np.inf)):
+            return None
+        return float(p.max_counts) * (
+            1 if self._nirc2_is_playing() else max(int(p.coadds), 1))
+
+    def _nirc2_show_cursor_value(self, event):
+        """x, y and the value of the pixel under the mouse over the image's
+        bottom-left corner, yellow near saturation and red at it."""
+        if (event.inaxes is None or event.xdata is None or event.ydata is None
+                or event.inaxes not in self.n2_fig.axes):
+            self.n2_cursor_label.hide()
+            return
+        x = int(np.floor(event.xdata + 0.5))
+        y = int(np.floor(event.ydata + 0.5))
+        v = self._nirc2_cursor_value(x, y)
+        if v is None:
+            self.n2_cursor_label.hide()
+            return
+        sat = self._nirc2_saturation_level()
+        level = (0 if sat is None or v < SATURATION_NEAR_FRAC * sat
+                 else (2 if v >= sat else 1))
+        self.n2_cursor_label.setText(
+            f"x {x}  y {y}  {v:.5g}" + ("", "  near sat", "  SATURATED")[level])
+        # on a dark box over the image whatever the theme
+        self.n2_cursor_label.setStyleSheet(
+            "QLabel { background: rgba(11, 15, 17, 200); color: %s; "
+            "font-size: 10px; padding: 1px 4px; }"
+            % ("#d7d7d7", "#d4a437", "#e08276")[level])
+        self.n2_cursor_label.adjustSize()
+        self.n2_cursor_label.move(
+            4, self.n2_canvas.height() - self.n2_cursor_label.height() - 4)
+        self.n2_cursor_label.show()
+        self.n2_cursor_label.raise_()
+
+    # ---- colour map (right-drag) and the stretch menu (right-click)
+    def _nirc2_clim(self, vmin, vmax):
+        """(lo, hi) the image is drawn with: the stretch's window through
+        the colour map's bias / contrast (DS9: an output of 0.5 at `bias`,
+        the window narrowed by `contrast`); the stretch alone at the
+        defaults."""
+        b, c = self._n2_bias, self._n2_contrast
+        span = vmax - vmin
+        return vmin + span * (b - 0.5 / c), vmin + span * (b + 0.5 / c)
+
+    def _nirc2_shown_image(self):
+        """The AxesImage in the main view: the playing plane, else the
+        measured frame (None for neither)."""
+        for im in (getattr(self, "_n2_play_im", None),
+                   getattr(self, "_n2_main_im", None)):
+            if im is not None and im.axes is not None and im.axes in self.n2_fig.axes:
+                return im
+        return None
+
+    def _nirc2_stretch_text(self):
+        """The display stretch in words, for the log."""
+        mode = self.n2_stretch.currentText()
+        text = mode if mode == "IDL ±5σ" else (
+            f"{mode} (white {self.n2_white.value():g} %)")
+        return (f"{text}, bias {self._n2_bias:.2f}, "
+                f"contrast {self._n2_contrast:.2f}")
+
+    def _nirc2_apply_colour_map(self):
+        """Give the image on display the current bias / contrast: new
+        limits on the same stretched pixels, drawn by draw_idle."""
+        at_default = (self._n2_bias, self._n2_contrast) == (BIAS_DEFAULT,
+                                                             CONTRAST_DEFAULT)
+        self.n2_cmap_lbl.setText(
+            "" if at_default
+            else f"b{self._n2_bias:.2f} c{self._n2_contrast:.2g}")
+        im = self._nirc2_shown_image()
+        if im is None or self._n2_clim_base is None:
+            return
+        im.set_clim(*self._nirc2_clim(*self._n2_clim_base))
+        self.n2_canvas.draw_idle()
+
+    def _nirc2_colour_map_at(self, x, y):
+        """Right-drag: the cursor's canvas position sets the colour map
+        like DS9 -- left..right = bias 0..1, bottom..top = contrast over
+        CONTRAST_RANGE on a log scale (1 in the middle)."""
+        box = self.n2_fig.bbox
+        fx = min(max(float(x) / max(box.width, 1.0), 0.0), 1.0)
+        fy = min(max(float(y) / max(box.height, 1.0), 0.0), 1.0)
+        lo, hi = CONTRAST_RANGE
+        self._n2_bias, self._n2_contrast = fx, lo * (hi / lo) ** fy
+        self._nirc2_apply_colour_map()
+
+    def _nirc2_reset_colour_map(self):
+        """Bias and contrast back to the stretch alone."""
+        self._n2_bias, self._n2_contrast = BIAS_DEFAULT, CONTRAST_DEFAULT
+        self._nirc2_apply_colour_map()
+        self.n2_log.appendPlainText(f"display: {self._nirc2_stretch_text()}")
+
+    def _nirc2_build_stretch_menu(self):
+        """The image's right-click menu: the stretches (they set the
+        Stretch combo, which holds the setting) and Reset colour map."""
+        menu = QtWidgets.QMenu(self)
+        menu.addSection("Stretch")
+        group = (getattr(QtGui, "QActionGroup", None)
+                 or QtWidgets.QActionGroup)(menu)
+        group.setExclusive(True)
+        self._n2_stretch_actions = {}
+        for name in STRETCHES:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            group.addAction(act)
+            act.triggered.connect(
+                lambda _checked=False, n=name: self.n2_stretch.setCurrentText(n))
+            self._n2_stretch_actions[name] = act
+        menu.addSeparator()
+        self._n2_reset_cmap_action = menu.addAction("Reset colour map")
+        self._n2_reset_cmap_action.triggered.connect(
+            self._nirc2_reset_colour_map)
+        return menu
+
+    def _nirc2_show_stretch_menu(self):
+        """Open the stretch menu at the cursor (a right click on the
+        image), its current stretch ticked."""
+        act = self._n2_stretch_actions.get(self.n2_stretch.currentText())
+        if act is not None:
+            act.setChecked(True)
+        self.n2_stretch_menu.popup(QtGui.QCursor.pos())

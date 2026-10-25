@@ -1,6 +1,6 @@
-# Keck AO Performance Estimator
+# KAPE — Keck AO Performance Estimator
 
-Estimate W. M. Keck Observatory adaptive-optics performance — NGS, single-beacon
+KAPE estimates W. M. Keck Observatory adaptive-optics performance — NGS, single-beacon
 LGS, and LTAO **Strehl** and **FWHM** at a chosen science wavelength — across a
 night from Mauna Kea MASS/DIMM seeing, using a semi-analytical error budget. A
 command-line tool and a PyQt GUI share one engine.
@@ -26,7 +26,8 @@ pip install ".[gui]"
 pip install .
 ```
 
-Both provide the `keck-ao-estimator` and `keck-ao-estimator-gui` commands. Use
+Both provide the `kape` and `kape-gui` commands (the older
+`keck-ao-estimator` and `keck-ao-estimator-gui` still work). Use
 `pip install -e ".[gui]"` for an editable/development install.
 
 Prefer not to install? You can run it in place from the clone after installing
@@ -45,7 +46,7 @@ You can also install straight from GitHub without cloning:
 pip install "keck-ao-performance-estimator[gui] @ git+https://github.com/KeckObservatory/keck-ao-performance-estimator"
 ```
 
-Pin a release with `...keck-ao-performance-estimator@v1.5.0` at the end of the
+Pin a release with `...keck-ao-performance-estimator@v1.6.0` at the end of the
 URL. If the tool is later published to PyPI, installation will simply be
 `pip install "keck-ao-performance-estimator[gui]"`.
 
@@ -53,14 +54,14 @@ URL. If the tool is later published to PyPI, installation will simply be
 
 ```bash
 # GUI
-keck-ao-estimator-gui
+kape-gui
 
 # CLI — e.g. a night's K-band LGS Strehl on K1
-keck-ao-estimator --telescope K1 --target --ra 17h45m40s --dec -29d00m28s \
+kape --telescope K1 --target --ra 17h45m40s --dec -29d00m28s \
     --dimm 20260525_dimm.dat --mass 20260525_mass.dat --masspro 20260525_masspro.dat
 
-keck-ao-estimator --version
-keck-ao-estimator --help
+kape --version
+kape --help
 ```
 
 ## Features

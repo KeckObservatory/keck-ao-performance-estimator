@@ -373,8 +373,22 @@ def main():
         os.makedirs(local_dir, exist_ok=True)
         return shutil.copy(os.path.join(server, os.path.basename(rpath)),
                            local_dir)
+    def fake_rsync_list(target, filters=(), recursive=False, timeout=30.0):
+        # the frame list's one-off listing of a remote PATH
+        # (RemoteListWorker): the "server" directory, never a real rsync
+        import datetime as _dt
+        assert target.startswith("k2ao:"), target
+        calls["rlist"] = calls.get("rlist", 0) + 1
+        out = []
+        for n in sorted(os.listdir(server)):
+            fp = os.path.join(server, n)
+            out.append((False, n, os.path.getsize(fp),
+                        _dt.datetime.fromtimestamp(os.path.getmtime(fp))))
+        return out
     real_list, real_fetch = fw.remote_newest_frame, fw.remote_fetch
+    real_rsync_list = fw._rsync_list
     fw.remote_newest_frame, fw.remote_fetch = fake_list, fake_fetch
+    fw._rsync_list = fake_rsync_list
     try:
         make_osiris(server)
         win.n2_instrument.setCurrentText("OSIRIS")
@@ -403,7 +417,10 @@ def main():
         assert calls["fetch"] == 1
         assert os.path.isfile(os.path.join(win._nirc2_frames_dir(),
                                            "i260723_a000001.fits"))
-        assert win.n2_files.count() == 1, "file list shows the cache"
+        pump(lambda: win.n2_files.count() == 1, timeout=10)
+        assert win.n2_files.count() == 1, \
+            "file list shows the remote listing"
+        assert calls.get("rlist", 0) >= 1, "a remote PATH is listed by rsync"
         assert win._n2_image.shape == (2048, 2048)
         w = win._n2_watcher
         win.n2_path.setText("k2ao:/s/sdata1100/osiris4/260924/IMAG/raw")
@@ -414,7 +431,11 @@ def main():
         win.n2_path.setText(tmp)
         assert not win.n2_rsync_flag.isVisible()
     finally:
+        win._n2_remote_list_timer.stop()
+        if win._n2_remote_list_worker is not None:
+            win._n2_remote_list_worker.wait(5000)
         fw.remote_newest_frame, fw.remote_fetch = real_list, real_fetch
+        fw._rsync_list = real_rsync_list
     print("  [ok] remote PATH: declined -> unticked, nothing listed; accepted "
           "-> red banner + tab tag, frame copied to the cache and measured; "
           "PATH change stops it and clears the flag")

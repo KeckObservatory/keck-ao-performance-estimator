@@ -48,6 +48,9 @@ def main():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QtWidgets.QApplication(sys.argv[:1])
     win = gui.MainWindow()
+    # these checks index the frame list by name (newest first is the
+    # default since 2026-10-25; gui_phase57 tests that order)
+    win.n2_file_sort.setCurrentText("Name")
 
     # ---- (1) _unp files are skipped in a NIRC2 directory -----------------
     for name, unp in (("n_unp_0017.fits", True),

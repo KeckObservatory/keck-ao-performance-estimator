@@ -19,7 +19,8 @@ pip install ".[gui]"
 pip install .
 ```
 
-Both provide the `keck-ao-estimator` and `keck-ao-estimator-gui` commands. Use
+Both provide the `kape` and `kape-gui` commands (the older
+`keck-ao-estimator` and `keck-ao-estimator-gui` still work). Use
 `pip install -e ".[gui]"` for an editable / development install.
 
 ## Run in place (without installing)
