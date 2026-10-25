@@ -211,8 +211,16 @@ def check_ifs():
     assert inst.apertures == (0.25, 0.30, 0.40, 0.1)
     assert instruments.get("nirc2").coadds_file == "unp"
     assert instruments.get("osiris").coadds_file == ""
+    mos = fits.Header({"CURRINST": "MOSFIRE", "INSTR": "imag"})     # osrseng 2026-10-25
+    assert instruments.identify(mos) is instruments.get("osiris")
+    assert instruments.identify_frame(fits.Header({"CURRINST": "MOSFIRE"}),
+                                      "i261025_a003008.fits") == (instruments.get("osiris"), "file name")
+    assert instruments.identify_frame(fits.Header({"INSTRUME": "GSAOI"}), "n0001.fits") == (None, "")
+    assert instruments.identify_frame(fits.Header(), "n0001.fits") == (None, "")
     print("  [ok] cubes and raw spectrograph frames -> OSIRIS IFU; imager "
-          "frames stay OSIRIS; names, apertures, NIRC2 coadds file")
+          "frames stay OSIRIS (INSTR = imag also when CURRINST = MOSFIRE; else "
+          "by file name, never against INSTRUME or for a stub header); names, "
+          "apertures, NIRC2 coadds file")
     p = osiris_ifs.ifs_frame_params(hdr, 2.17)
     assert p.plate_scale_mas == 35.0 and p.effwave_um == 2.17
     assert p.filter_name == "Kn3" and p.pmsname == "open"

@@ -59,6 +59,7 @@ from datetime import datetime, timedelta, timezone
 __all__ = ["INSTRUMENTS_ENV", "BUILTIN_DIR", "Instrument", "FramePrep",
            "load_registry",
            "registry", "load_errors", "get", "names", "identify",
+           "identify_frame", "identity_text",
            "find_latest_night", "reload"]
 
 INSTRUMENTS_ENV = "KECK_AO_INSTRUMENTS"
@@ -579,6 +580,49 @@ def identify(header):
                    if ("contains" in r) == specific):
                 return inst
     return None
+
+
+IDENTITY_KEYS = ("INSTRUME", "CURRINST", "INSTR", "CAMNAME")
+
+
+def identity_text(header):
+    """The header's identity cards for a log line: 'CURRINST=MOSFIRE,
+    INSTR=imag', or 'unknown instrument (no INSTRUME / CURRINST / INSTR /
+    CAMNAME)'."""
+    cards = [f"{k}={_header_str(header, k)}" for k in IDENTITY_KEYS if _header_str(header, k)]
+    return ", ".join(cards) if cards else "unknown instrument (no " + " / ".join(IDENTITY_KEYS) + ")"
+
+
+def identify_frame(header, filename=None, selected=None):
+    """(instrument, how) for a frame: identify() by its header ("header"),
+    else by its file name ("file name"): the header's DATAFILE (the
+    observatory name KOA keeps) or `filename`, matched against the frame
+    patterns -- the `selected` instrument (key or name) first, then menu
+    order. (None, "") when neither says. The fallback catches a header
+    whose identity cards name the TELESCOPE's selected instrument rather
+    than the frame's (Keck I's CURRINST = MOSFIRE on OSIRIS daytime frames).
+    It is not used when INSTRUME names an instrument (the frame's own: one
+    without a parameter file is refused), nor for a header without any
+    identity card (one still being written: the summit NIRC2 writer fills
+    the header in after the file has its size)."""
+    inst = identify(header)
+    if inst is not None:
+        return inst, "header"
+    if _header_str(header, "INSTRUME") or not any(_header_str(header, k) for k in IDENTITY_KEYS):
+        return None, ""
+    names_ = [n for n in (_header_str(header, "DATAFILE"), os.path.basename(str(filename or ""))) if n]
+    order = list(registry().values())
+    if selected is not None:
+        try:
+            first = get(selected)
+            order = [first] + [i for i in order if i is not first]
+        except KeyError:
+            pass
+    for name in names_:
+        for inst in order:
+            if inst.is_frame(name):
+                return inst, "file name"
+    return None, ""
 
 
 # ------------------------------------------------------------ Latest

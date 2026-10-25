@@ -251,13 +251,15 @@ class Nirc2MeasureWorker(QThread):
                             f"{self.suffix}.fits")
 
     def run(self):
+        import os
+
         import numpy as np
         from astropy.io import fits
 
         from ..frame_watch import (HEADER_WAIT_S, header_identifies,
                                    wait_for_header)
         from ..image_strehl import _failed, find_stars, measure_strehl
-        from ..instruments import FramePrep, identify, names
+        from ..instruments import FramePrep, identify_frame, identity_text, names
 
         # per-instrument calibration, loaded once; a missing one no longer
         # stops the run: frames are then shown but not measured (Eduardo
@@ -307,14 +309,21 @@ class Nirc2MeasureWorker(QThread):
                 # the instrument parameter files (instruments.py) decide:
                 # NIRC2 and OSIRIS keep their own pipelines; any other
                 # instrument needs a file whose identify rules match
-                inst = identify(header)
+                # by the header's identity cards, else by the frame's file
+                # name (OSIRIS daytime frames carry Keck I's CURRINST =
+                # MOSFIRE and no INSTRUME; in sync with PyAO's strehl_tool)
+                inst, how = identify_frame(header, os.path.basename(fpath))
                 if inst is None:
-                    instrume = str(header.get("INSTRUME", "")).upper()
                     self.frame_failed.emit(
-                        no, f"{instrume or 'unknown instrument'}: not a "
-                            f"known instrument (known: {', '.join(names())};"
-                            " add one with a parameter file)")
+                        no, f"{identity_text(header)}: not a known "
+                            f"instrument (known: {', '.join(names())}; add "
+                            "one with a parameter file)")
                     continue
+                if how == "file name":
+                    self.frame_failed.emit(
+                        no, f"its header names no known instrument "
+                            f"({identity_text(header)}) -- measured as "
+                            f"{inst.name} from its file name")
                 if inst.is_ifs:
                     # an OSIRIS spectrograph cube, measured whole: model
                     # FWHM vs the diffraction limit, SR relative

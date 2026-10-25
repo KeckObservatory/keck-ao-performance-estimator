@@ -46,12 +46,15 @@ OSIRIS_UNKNOWN_FILTER_UM = 2.2          # the tool's fallback
 
 def detect_instrument(header):
     """'nirc2' / 'osiris' / '' from a frame header.  NIRC2 writes
-    INSTRUME; OSIRIS imager frames carry CURRINST (INSTRUME absent)."""
+    INSTRUME; OSIRIS frames carry CURRINST (INSTRUME absent) and their own
+    INSTR = imag / spec -- CURRINST is Keck I's selected instrument, which
+    can be another one (MOSFIRE on daytime frames)."""
     instrume = str(header.get("INSTRUME", "") or "").upper()
     if "NIRC2" in instrume:
         return "nirc2"
     currinst = str(header.get("CURRINST", "") or "").upper()
-    if "OSIRIS" in currinst or "OSIRIS" in instrume:
+    instr = str(header.get("INSTR", "") or "").strip().lower()
+    if "OSIRIS" in currinst or "OSIRIS" in instrume or instr in ("imag", "spec"):
         return "osiris"
     return ""
 
