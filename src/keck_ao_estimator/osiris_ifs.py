@@ -35,12 +35,20 @@ is the sigma-clipped median of the valid spaxels in the annulus, and the
 photometry footprint's share on invalid spaxels is the EDGE fraction.
 Pupil: the OSIRIS imager tool's -- the open Keck pupil at 38 deg
 (osiris.py) -- so the two OSIRIS modes share one reference.
+
+A cube without its star (dithered off the field) is refused: the star's
+spaxel must stand IFS_MIN_PEAK_SIGMA (8) robust sigma above the median of
+the valid spaxels (20 ORP cubes of 2026-07-14 / 10-20 / 10-21: no star
+1.6-4.7 sigma, stars 10.7-766 sigma). The model fit uses the part of its
+window on the field, so a star a spaxel or two from the edge of a 16-spaxel
+broadband field still gets its FWHM (the note gives the share of the core
+used).
 """
 from dataclasses import dataclass, replace
 
 import numpy as np
 
-__all__ = ["IFS_GOOD_DQ", "IFS_PHOTOMETRY_ARCSEC", "IFS_SKY_INNER_ARCSEC",
+__all__ = ["IFS_GOOD_DQ", "IFS_MIN_PEAK_SIGMA", "IFS_PHOTOMETRY_ARCSEC", "IFS_SKY_INNER_ARCSEC",
            "IFS_SKY_OUTER_ARCSEC", "IFS_PEAK_ARCSEC", "IFS_DEFAULT_BIN",
            "IfsCube", "is_ifs_cube", "is_ifs_raw", "spaxel_scale_mas",
            "wavelengths_um", "channel_bins", "read_cube", "collapse",
@@ -54,6 +62,9 @@ IFS_SKY_OUTER_ARCSEC = 0.40
 IFS_PEAK_ARCSEC = 0.10
 IFS_DEFAULT_BIN = 25            # channels per wavelength plane
 IFS_MIN_SKY_SPAXELS = 8         # fewer valid annulus spaxels: sky = 0
+IFS_MIN_PEAK_SIGMA = 8.0        # the star's spaxel above the median of the
+                                # valid ones, in robust sigma (MAD): else
+                                # there is no star in the field
 _PAD_MARGIN_PX = 4
 
 
@@ -237,12 +248,24 @@ def measure_ifs(image, valid, params, pos=None,
         return _failed(params, "the cube has no valid spaxel")
     idl = idl_version or SR_TOOL_IDL_DEFAULT
     ps = params.plate_scale_mas
+    smooth = sigma_filter3(display_image(image, valid))
     if pos is None:
-        work = np.where(valid, sigma_filter3(display_image(image, valid)), -np.inf)
+        work = np.where(valid, smooth, -np.inf)
         iy, ix = np.unravel_index(int(np.argmax(work)), work.shape)
         x0, y0 = float(ix), float(iy)
     else:
         x0, y0 = float(pos[0]), float(pos[1])
+    # a star, not the brightest noise spaxel: the centroid alone can lock on
+    # noise in a cube without its star
+    vals = image[valid]
+    med = float(np.median(vals))
+    mad = 1.4826 * float(np.median(np.abs(vals - med)))
+    iyc = min(max(int(round(y0)), 0), image.shape[0] - 1)
+    ixc = min(max(int(round(x0)), 0), image.shape[1] - 1)
+    signif = (float(smooth[iyc, ixc]) - med) / mad if mad > 0 else np.inf
+    if signif < IFS_MIN_PEAK_SIGMA:
+        return _failed(params, f"no star: the spaxel at ({x0:.0f}, {y0:.0f}) is {signif:.1f} sigma above the "
+                               f"field (< {IFS_MIN_PEAK_SIGMA:g}) -- is the star in the IFU field?")
     yy, xx = np.indices(image.shape)
     rr = np.hypot(xx - x0, yy - y0) * ps / 1000.0
     ring = valid & (rr >= bg_inner_arcsec) & (rr <= bg_outer_arcsec)

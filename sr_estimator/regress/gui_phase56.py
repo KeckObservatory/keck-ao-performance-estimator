@@ -28,6 +28,7 @@ from astropy.io import fits
 
 TMP = tempfile.mkdtemp(prefix="gui56_")
 os.environ.pop("KECK_AO_INSTRUMENTS", None)
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from keck_ao_estimator import (frame_watch, instruments, model_fwhm,
                                nirc2_coadds, osiris_ifs)
@@ -236,6 +237,17 @@ def check_ifs():
     assert abs(a[0, 1] - 44.4) < 0.5 and np.all(a[:, 3] == 0.0), a
     print(f"  [ok] model FWHM {a[:, 0].mean():.1f} mas (truth {truth:.1f}) at "
           f"three spaxel phases, spread {np.ptp(a[:, 0]):.2f}; DL {a[0, 1]:.1f}")
+    # a broadband field is 16 spaxels wide: a star 1.5 spaxels from its edge
+    # is fitted on the part of the core on the field, same FWHM
+    data, dq = ifs_cube(35, 24.3, 1.5, sigma_mas=10.0)
+    write_cube(f, data, dq, hdr)
+    cube_e = osiris_ifs.read_cube(f)
+    img_e, valid_e = osiris_ifs.collapse(cube_e)
+    re = osiris_ifs.measure_ifs(img_e, valid_e, pp)
+    assert re.ok and abs(re.fwhm_mas - truth) < 0.6, (re.fwhm_mas, truth, re.note)
+    assert "of the core (the rest off the field)" in re.note, re.note
+    print(f"  [ok] star 1.5 spaxels from the field edge: model FWHM "
+          f"{re.fwhm_mas:.1f} mas ({re.note})")
     # wavelength bins: the reference follows the bin's wavelength
     b = osiris_ifs.channel_bins(cube.nchan, 20)
     res = []
@@ -249,8 +261,9 @@ def check_ifs():
     # no star in the field
     empty = np.where(valid, 2.0 + RNG.normal(0, 0.05, img.shape), 0.0)
     r = osiris_ifs.measure_ifs(empty, valid, pp)
-    assert not r.ok and "IFU field" in r.error, r.error
-    print("  [ok] a cube without its star fails and says so")
+    assert not r.ok and "no star" in r.error and "IFU field" in r.error, r.error
+    print("  [ok] a cube without its star fails and says so (detection "
+          f"threshold {osiris_ifs.IFS_MIN_PEAK_SIGMA:g} sigma)")
 
 
 def check_latest_and_psf():

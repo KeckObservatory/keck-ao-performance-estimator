@@ -36,6 +36,7 @@ KECK_D_M = 10.0                 # lambda/D for the fit radius only
 FIT_RADIUS_LD = 2.0             # fit pixels within max(2 lambda/D, ...)
 FIT_RADIUS_MIN_PX = 2.5         # ... 2.5 pixels) of the star
 MAX_BLUR_LD = 5.0               # Gaussian sigma bound, lambda/D
+CLIP_NOTE_FRAC = 0.10           # say so when more of the core is off the field
 
 
 @dataclass(frozen=True)
@@ -149,24 +150,36 @@ def fit_model_fwhm(image, x, y, plate_scale_mas, effwave_um, valid=None,
                    pmsname="open", pmrangl_deg=0.0):
     """Fit the blurred, pixel-integrated diffraction-limited PSF to the core
     of the star near (x, y) in `image` (pixels; `valid` marks usable ones)
-    and return a ModelFwhm (module docstring). ok is False, with the reason
-    in note, when the window leaves the image, too few pixels are valid or
-    the fit fails."""
+    and return a ModelFwhm (module docstring). The part of the fit window
+    off the image or on invalid pixels is left out (an OSIRIS broadband
+    field is 16 spaxels wide); the note says how much of the core was used
+    when more than 10 % was not. ok is False, with the reason in note, when
+    the star is off the image, fewer than 8 core pixels are usable or the
+    fit fails."""
     from scipy.optimize import least_squares
     image = np.asarray(image, dtype=float)
     valid = np.ones(image.shape, bool) if valid is None else np.asarray(valid, bool)
     r_px, n, lam_d = _fit_window(plate_scale_mas, effwave_um)
     h = n // 2
     cx, cy = int(round(x)), int(round(y))
-    if cx - h < 0 or cy - h < 0 or cx + h >= image.shape[1] or cy + h >= image.shape[0]:
-        return ModelFwhm(False, note="the fit window leaves the image")
-    win = image[cy - h:cy + h + 1, cx - h:cx + h + 1]
-    ok = valid[cy - h:cy + h + 1, cx - h:cx + h + 1]
+    if not (0 <= cx < image.shape[1] and 0 <= cy < image.shape[0]):
+        return ModelFwhm(False, note="the star is off the image")
+    # the window may run off the image (the OSIRIS broadband fields are 16
+    # spaxels wide): pixels off it are left out like invalid ones, so the
+    # fit uses the part of the core on the field
+    win = np.zeros((n, n))
+    ok = np.zeros((n, n), dtype=bool)
+    y0, y1 = max(cy - h, 0), min(cy + h + 1, image.shape[0])
+    x0, x1 = max(cx - h, 0), min(cx + h + 1, image.shape[1])
+    win[y0 - (cy - h):y1 - (cy - h), x0 - (cx - h):x1 - (cx - h)] = image[y0:y1, x0:x1]
+    ok[y0 - (cy - h):y1 - (cy - h), x0 - (cx - h):x1 - (cx - h)] = valid[y0:y1, x0:x1]
     u = np.arange(n, dtype=float) - h
     rr = np.hypot(u[None, :] - (x - cx), u[:, None] - (y - cy))
-    use = ok & (rr <= r_px)
+    core = rr <= r_px
+    use = ok & core
     if use.sum() < 8:
         return ModelFwhm(False, note=f"only {int(use.sum())} valid pixels in the core")
+    clipped = 1.0 - float(use.sum()) / float(core.sum())
     g = _grid(plate_scale_mas, effwave_um, pmsname, pmrangl_deg, n)
     data = win[use]
     edge = win[ok & (rr > r_px - 1.0)] if (ok & (rr > r_px - 1.0)).any() else data
@@ -189,9 +202,12 @@ def fit_model_fwhm(image, x, y, plate_scale_mas, effwave_um, valid=None,
         return ModelFwhm(False, note=f"model fit did not converge ({sol.message})")
     amp, dx, dy, sig, b = sol.x
     peak = max(float(data.max() - b), 1e-12)
-    note = ""
+    notes = []
+    if clipped > CLIP_NOTE_FRAC:
+        notes.append(f"model fit on {100 * (1 - clipped):.0f} % of the core (the rest off the field)")
     if sig >= 0.98 * sig_max:
-        note = f"blur at its bound ({MAX_BLUR_LD:g} lambda/D): the core is not resolved"
+        notes.append(f"blur at its bound ({MAX_BLUR_LD:g} lambda/D): the core is not resolved")
+    note = "; ".join(notes)
     return ModelFwhm(
         True, fwhm_mas=g.optical_fwhm(abs(sig)), fwhm_dl_mas=g.optical_fwhm(0.0),
         sigma_mas=float(abs(sig)), x=float(cx + dx), y=float(cy + dy),
