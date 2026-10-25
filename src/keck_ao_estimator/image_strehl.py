@@ -610,6 +610,16 @@ class Nirc2StrehlResult:
     photrad_used_arcsec: float = 0.0    # aperture actually used
     idl_version: str = SR_TOOL_IDL_DEFAULT  # FWHM/reference convention
     edge_clip: float = 0.0      # fraction of the outer-annulus disc off-array
+    # what was measured, when it is not a whole frame: "coadd" (one NIRC2
+    # coadd from the _unp file, short-exposure SR -- nirc2_coadds.py) or
+    # "ifs" (an OSIRIS spectrograph cube, FWHM first and SR relative --
+    # osiris_ifs.py); "" for every frame measured as before
+    mode: str = ""
+    # the diffraction-limited FWHM the FWHM is compared with (osiris_ifs:
+    # the hexagonal-pupil optical FWHM at the bin's wavelength, from the
+    # model fit of model_fwhm.py); 0.0 when not computed
+    fwhm_dl_mas: float = 0.0
+    note: str = ""              # what the reader should know (mode-specific)
 
     # --- PSF-fit neighbour subtraction (opt-in; see psf_fit.py) --------
     # Additive only: every field defaults to the value the untouched

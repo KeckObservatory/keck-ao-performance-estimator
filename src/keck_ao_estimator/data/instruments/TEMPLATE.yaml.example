@@ -16,12 +16,14 @@ description: One line about the instrument.
 identify:                       # any rule matching = this instrument
   - {keyword: INSTRUME, contains: MYINST}     # case-insensitive substring
   # - {keyword: CAMERA, present: true, unless: [INSTRUME]}
+  # - {keyword: INSTRUME, contains: MYINST, unless_contains: {MODE: spec}}
 
 frames:
   pattern: '^img(\d{5})\.fits$' # regex on the file name; group 1 = number
   digits: 5                     # zero padding of the number (FIRST IMAGE)
   prefix: img                   # default PREFIX
-  # suffix: _0000               # text after the number (ORKID test_0014_0000.fits)
+  # suffix: _0000               # text after the number (ORKID test_0014_0000.fits;
+                                # a * matches any text, OSIRIS IFU _<filter>_<scale>)
   # watch_by_prefix: true       # auto-measure looks only at the PREFIX's files
                                 # (several prefixes share one directory)
   # skip: '_raw\.'              # names that match pattern but are not frames

@@ -1,0 +1,38 @@
+# OSIRIS spectrograph (lenslet IFU), Keck I: the summit pipeline's (ORP)
+# datacubes, measured FWHM first with a RELATIVE SR (osiris_ifs.py). The
+# field is (16 or 48 lenslets) x 64 at 20/35/50/100 mas -- too small for
+# the 1" photometry convention, so the SR uses one small aperture kept
+# fixed (default 0.25", sky 0.30-0.40") to compare cubes or wavelengths.
+key: osiris_ifs
+name: OSIRIS IFU
+telescope: Keck I
+order: 25
+description: OSIRIS spectrograph datacubes (ORP); FWHM vs the spaxel-sampled diffraction limit, SR relative.
+
+identify:
+  - {keyword: INSTR, contains: spec}
+
+frames:
+  pattern: '^s\d{6}_a(\d{6})_[A-Za-z0-9]+_\d{3}\.fits$'   # s<YYMMDD>_a<set><frame>_<filter>_<scale>.fits
+  digits: 6
+  prefix: ''                    # filled in from the cubes in PATH
+  suffix: '_*'                  # the filter and scale, matched in PATH
+  skip: '^s\d{6}_a\d{6}\.fits$'    # the raw detector frames (SPEC/raw): spectra
+  skip_reason: a raw spectrograph frame (spectra, not an image) -- open its cube in the night's SPEC/ORP
+
+night:
+  model: osiris                 # /s/sdata1100/<account>/<YYMMDD>/...
+  subdir: SPEC/ORP              # ... the ORP cubes of that night
+params:
+  model: osiris_ifs             # SSCALE spaxels, wavelength from the cube axis
+reduce:
+  model: osiris_ifs             # good voxels (DQ 9) averaged over wavelength
+  backgrounds: false
+pupil:
+  model: keck                   # the OSIRIS imager tool's open pupil at 38 deg
+
+apertures:                      # a relative SR: one small aperture, fixed
+  photometry_arcsec: 0.25
+  sky_inner_arcsec: 0.30
+  sky_outer_arcsec: 0.40
+  peak_arcsec: 0.1

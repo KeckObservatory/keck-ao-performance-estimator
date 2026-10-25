@@ -6,9 +6,10 @@ telescope: Keck I
 order: 20
 description: OSIRIS imager (post-2016 detector), K1 tool reduction.
 
-identify:
-  - {keyword: CURRINST, contains: OSIRIS}
-  - {keyword: INSTRUME, contains: OSIRIS}
+identify:                       # the imager; spectrograph frames (INSTR =
+                                # spec) are OSIRIS IFU's (osiris_ifs.yaml)
+  - {keyword: CURRINST, contains: OSIRIS, unless_contains: {INSTR: spec}}
+  - {keyword: INSTRUME, contains: OSIRIS, unless_contains: {INSTR: spec}}
 
 frames:
   pattern: '^i\d{6}_a(\d{6})\.fits$'   # i<YYMMDD>_a<set:3><frame:3>.fits

@@ -125,7 +125,7 @@ def main():
     win._nirc2_prefetch_guide_stars = lambda seq, cont: cont()
     items = [win.n2_instrument.itemText(i)
              for i in range(win.n2_instrument.count())]
-    assert items == ["NIRC2", "OSIRIS", "ORKID"], items
+    assert items == ["NIRC2", "OSIRIS", "OSIRIS IFU", "ORKID"], items
     win.n2_instrument.setCurrentText("ORKID")
     assert win._nirc2_kind() == "orkid" and win.n2_prefix.text() == "test_"
     assert win._nirc2_radii() == (0.35, 0.40, 0.48, 0.1), win._nirc2_radii()

@@ -28,9 +28,18 @@ primary with central obscuration and spider vanes, pupil_psf.py). See
 ``data/instruments/TEMPLATE.yaml.example`` for every field.
 
 Optional per-instrument fields: ``frames.suffix`` (text after the number,
-ORKID's ``_0000``), ``frames.watch_by_prefix`` (auto-measure considers only
-the PREFIX's files: ORKID writes every prefix into one directory) and
-``apertures`` (the GUI's default photometry / sky / peak radii).
+ORKID's ``_0000``; a ``*`` in it is matched against the directory, OSIRIS
+IFU cubes' ``_<filter>_<scale>``), ``frames.watch_by_prefix`` (auto-measure
+considers only the PREFIX's files: ORKID writes every prefix into one
+directory), ``frames.coadds: unp`` (each frame's coadds are in its NIRC2
+``_unp`` file: nirc2_coadds.py), ``night.subdir`` with the ``osiris`` model
+(the night's SPEC/ORP instead of IMAG/raw) and ``apertures`` (the GUI's
+default photometry / sky / peak radii). An identify rule may carry
+``unless_contains: {KEYWORD: text}`` (the rule fails when that keyword holds
+the text: OSIRIS imager rules skip INSTR = spec).
+
+The OSIRIS spectrograph (``params/reduce: osiris_ifs``) measures datacubes,
+not frames: osiris_ifs.py (FWHM first, SR relative in a small aperture).
 
 identify() tries the specific rules (``contains``) of every instrument
 before the catch-all ones (``present``), so an ORKID frame (CAMNAME = orkid,
@@ -55,8 +64,8 @@ __all__ = ["INSTRUMENTS_ENV", "BUILTIN_DIR", "Instrument", "FramePrep",
 INSTRUMENTS_ENV = "KECK_AO_INSTRUMENTS"
 BUILTIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "data", "instruments")
-PARAMS_MODELS = ("nirc2", "osiris", "orkid", "generic")
-REDUCE_MODELS = ("nirc2", "osiris", "orkid", "generic")
+PARAMS_MODELS = ("nirc2", "osiris", "osiris_ifs", "orkid", "generic")
+REDUCE_MODELS = ("nirc2", "osiris", "osiris_ifs", "orkid", "generic")
 NIGHT_MODELS = ("nirc2", "osiris", "directories", "fixed", "none")
 PUPIL_MODELS = ("keck", "orkid", "circular")
 APERTURE_KEYS = ("photometry_arcsec", "sky_inner_arcsec", "sky_outer_arcsec",
@@ -71,6 +80,9 @@ def _rule_matches(rule, header):
     key = rule["keyword"]
     for other in rule.get("unless", ()):
         if _header_str(header, other):
+            return False
+    for other, text in rule.get("unless_contains", {}).items():
+        if str(text).upper() in _header_str(header, other).upper():
             return False
     if "contains" in rule:
         return str(rule["contains"]).upper() in _header_str(header, key).upper()
@@ -102,6 +114,12 @@ class Instrument:
     suffix: str = ""
     watch_by_prefix: bool = False
     apertures: tuple | None = None
+    coadds_file: str = ""       # "unp": coadds in the NIRC2 _unp file
+
+    @property
+    def is_ifs(self):
+        """True for the OSIRIS spectrograph: datacubes, osiris_ifs.py."""
+        return self.params.get("model") == "osiris_ifs"
 
     # ---- identity and file names
     def matches(self, header):
@@ -155,6 +173,10 @@ class Instrument:
         if model == "osiris":
             from .osiris import osiris_frame_params
             return osiris_frame_params(header)
+        if model == "osiris_ifs":
+            from .osiris_ifs import ifs_frame_params, wavelengths_um
+            wl = wavelengths_um(header)
+            return ifs_frame_params(header, float(wl[len(wl) // 2]))
         if model == "orkid":
             from .orkid import orkid_frame_params, orkid_header_on_sky
             daytime = self.params.get("daytime", True)
@@ -172,7 +194,7 @@ class Instrument:
         if model == "nirc2":
             from . import image_strehl
             return image_strehl.load_nirc2_calibration()
-        if model in ("osiris", "orkid"):
+        if model in ("osiris", "osiris_ifs", "orkid"):
             return None, None
         return _generic_calibration(self)
 
@@ -187,6 +209,11 @@ class Instrument:
                                              flat=flat, badmask=mask)
         if model == "osiris":
             return image_strehl.osiris_reduce(raw, crop=False)
+        if model == "osiris_ifs":
+            # display only: the cube's mean over wavelength (the workers
+            # measure cubes with osiris_ifs.collapse and their quality map)
+            a = np.asarray(raw, dtype=float)
+            return np.nan_to_num(np.nanmean(a, axis=2)) if a.ndim == 3 else a
         if model == "orkid":
             from .orkid import orkid_reduce
             return orkid_reduce(raw, background=background)
@@ -225,6 +252,9 @@ class Instrument:
 
     def dl_psf(self, params, npix=512):
         """The diffraction-limited PSF on the detector grid, unit sum."""
+        if self.is_ifs:
+            from .osiris_ifs import ifs_dl_psf
+            return ifs_dl_psf(params, npix=npix)
         if self.pupil["model"] == "keck":
             from .nirc2_psf import nirc2_dl_psf
             return nirc2_dl_psf(params.camname, params.pmsname,
@@ -412,7 +442,11 @@ def _build(data, source):
                 "contains" in r or r.get("present")):
             raise ValueError("each identify rule needs 'keyword' and "
                              "'contains' (or 'present: true')")
-        rules.append(dict(r, unless=tuple(r.get("unless", ()))))
+        uc = r.get("unless_contains", {}) or {}
+        if not isinstance(uc, dict):
+            raise ValueError("unless_contains must map KEYWORD: text")
+        rules.append(dict(r, unless=tuple(r.get("unless", ())),
+                          unless_contains=dict(uc)))
     fr = data["frames"]
     if "pattern" not in fr or "digits" not in fr:
         raise ValueError("frames needs 'pattern' and 'digits'")
@@ -453,8 +487,16 @@ def _build(data, source):
         suffix=str(fr.get("suffix", "") or ""),
         watch_by_prefix=bool(fr.get("watch_by_prefix", False)),
         apertures=apertures,
+        coadds_file=_coadds_file(fr),
         **({"skip_reason": str(fr["skip_reason"])}
            if fr.get("skip_reason") else {}))
+
+
+def _coadds_file(frames):
+    c = str(frames.get("coadds", "") or "").strip().lower()
+    if c not in ("", "unp"):
+        raise ValueError(f"frames.coadds must be 'unp' (got {c!r})")
+    return c
 
 
 def _search_dirs(extra_dirs=None):
@@ -560,7 +602,12 @@ def find_latest_night(inst, utc_now=None):
     if model == "nirc2":
         return frame_watch.find_latest_night_dir(**kw)
     if model == "osiris":
-        return frame_watch.find_latest_osiris_night(**kw)
+        path, tonight = frame_watch.find_latest_osiris_night(**kw)
+        sub = str(inst.night.get("subdir", "") or "").strip("/")
+        if path and sub:
+            # the same night's spectrograph cubes (SPEC/ORP), not IMAG/raw
+            path = re.sub(r"/IMAG/raw/?$", "/" + sub, path)
+        return path, tonight
     if model == "none":
         return None, False
     if model == "fixed":

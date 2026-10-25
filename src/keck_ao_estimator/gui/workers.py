@@ -315,6 +315,35 @@ class Nirc2MeasureWorker(QThread):
                             f"known instrument (known: {', '.join(names())};"
                             " add one with a parameter file)")
                     continue
+                if inst.is_ifs:
+                    # an OSIRIS spectrograph cube, measured whole: model
+                    # FWHM vs the diffraction limit, SR relative
+                    # (osiris_ifs; PyAO's strehl_tool also steps through
+                    # its wavelength bins)
+                    from .. import osiris_ifs
+                    if not osiris_ifs.is_ifs_cube(header):
+                        self.frame_failed.emit(
+                            no, "a raw spectrograph frame (spectra, not an "
+                                "image) -- open its cube in the night's "
+                                "SPEC/ORP")
+                        continue
+                    cube = osiris_ifs.read_cube(fpath)
+                    image, valid = osiris_ifs.collapse(cube)
+                    params = osiris_ifs.ifs_frame_params(
+                        header, float(cube.wavelengths_um.mean()))
+                    reduced = osiris_ifs.display_image(image, valid)
+                    dl = prep.dl_psf(inst, params)
+                    result = None
+                    if self.autofind:
+                        result = osiris_ifs.measure_ifs(
+                            image, valid, params,
+                            photometry_radius_arcsec=photrad,
+                            bg_inner_arcsec=bgin, bg_outer_arcsec=bgout,
+                            peak_radius_arcsec=peakrad, dl_psf=dl,
+                            idl_version=self.idl_version)
+                    self.frame_done.emit(no, result, params, reduced, dl,
+                                         header)
+                    continue
                 with fits.open(fpath) as hdul:
                     raw = np.asarray(hdul[0].data, dtype=float)
                 params = inst.frame_params(header)

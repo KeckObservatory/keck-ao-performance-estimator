@@ -150,9 +150,13 @@ class Nirc2StrehlTabMixin:
             "written to last); when tonight's directory does not exist "
             "yet it picks the most recent night and says so.")
         self.n2_latest.clicked.connect(self._on_nirc2_latest)
+        # a spanning row with Latest (it sets the path): in the field column
+        # beside the form's widest label Latest was squeezed below its size
+        path_row.addWidget(QtWidgets.QLabel("Path:"))
         path_row.addWidget(self.n2_path, 1)
         path_row.addWidget(browse)
-        form.addRow("Path:", self._wrap(path_row))
+        path_row.addWidget(self.n2_latest)
+        form.addRow(self._wrap(path_row))
         # NIRC2 and OSIRIS can both be in use on one night: the choice
         # sets which frames auto-measure looks for, where Latest searches,
         # and which PATH is shown (each instrument remembers its own)
@@ -181,12 +185,12 @@ class Nirc2StrehlTabMixin:
         self.n2_instrument.currentTextChanged.connect(
             self._on_nirc2_instrument)
         # a spanning row: in the field column (beside the form's widest
-        # label) the combo and Latest were squeezed below their size
+        # label) the combo was squeezed below its size; Latest is on the
+        # Path row (it sets the path), so "OSIRIS IFU" fits the combo
         inst_row = QtWidgets.QHBoxLayout()
         inst_row.addWidget(QtWidgets.QLabel("Instrument:"))
         inst_row.addWidget(self.n2_instrument)
         inst_row.addStretch(1)
-        inst_row.addWidget(self.n2_latest)
         form.addRow(self._wrap(inst_row))
 
         self.n2_im1 = QtWidgets.QSpinBox()

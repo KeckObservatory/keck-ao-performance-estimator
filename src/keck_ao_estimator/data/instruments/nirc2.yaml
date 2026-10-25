@@ -17,6 +17,8 @@ frames:
   prefix: n
   skip: '_unp[_.]'              # n_unp_NNNN.fits / KOA *_unp.fits copies
   skip_reason: unprocessed (_unp) frame ignored
+  coadds: unp                   # ... which hold every coadd: CUBE PLANE
+                                # steps through them (nirc2_coadds.py)
 
 night:
   model: nirc2                  # /s/sdata900-907/<account>/<YYYYmonDD>[_X]

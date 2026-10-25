@@ -458,7 +458,7 @@ def main():
     cfg = win._collect_config()["nirc2"]
     assert cfg["instrument"] == "NIRC2"
     assert cfg["instrument_paths"] == {"NIRC2": tmp, "OSIRIS": rpath,
-                                       "ORKID": ""}, cfg
+                                       "OSIRIS IFU": "", "ORKID": ""}, cfg
     win.n2_watch.setChecked(True)
     pump(lambda: win.n2_go.isEnabled())
 

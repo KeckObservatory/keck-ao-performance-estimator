@@ -159,15 +159,22 @@ def _block_mean(a, fac):
 
 def nirc2_dl_psf(camname="narrow", pmsname="largehex", effwave_um=2.1245,
                  pmrangl=0.0, npix=512, pos=(0.0, 0.0), daytime=False,
-                 sfp=False, return_pupil=False):
+                 sfp=False, return_pupil=False, plate_scale_mas=None):
     """Diffraction-limited monochromatic NIRC2 PSF, normalized to unit sum.
 
     Port of nirc2psf.pro.  The half-pixel phase-ramp offset of the original
     is kept, so the PSF core sits on pixel corners for pos=(0, 0) exactly
     as the IDL reference images do.
+
+    `plate_scale_mas` samples the PSF at that pixel scale instead of the
+    camera's (the OSIRIS spectrograph's 20 / 35 / 50 / 100 mas spaxels,
+    osiris_ifs.py); None keeps the camera table, so every existing caller
+    is unchanged.
     """
     camname = camname.strip().lower()
     pscl = _CAMERA_RAD_PER_PIX.get(camname, _CAMERA_RAD_PER_PIX["narrow"])
+    if plate_scale_mas is not None:
+        pscl = float(plate_scale_mas) / 1000.0 / 206265.0
     lam_m = effwave_um * 1e-6
 
     tmp = pscl * 12.0 / lam_m
