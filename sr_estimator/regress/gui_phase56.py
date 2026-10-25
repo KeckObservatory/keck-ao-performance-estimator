@@ -31,7 +31,7 @@ os.environ.pop("KECK_AO_INSTRUMENTS", None)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from keck_ao_estimator import (frame_watch, instruments, model_fwhm,
-                               nirc2_coadds, osiris_ifs)
+                               nirc2_coadds, osiris_ifs, osiris_orp)
 from keck_ao_estimator.image_strehl import measure_strehl
 from keck_ao_estimator.nirc2 import nirc2_frame_params
 from keck_ao_estimator.nirc2_psf import nirc2_dl_psf
@@ -286,6 +286,46 @@ def check_latest_and_psf():
           "unchanged without plate_scale_mas")
 
 
+def check_orp():
+    """What a cube had subtracted (its header's DRF), why raw frames have no
+    cube, and an A-B cube's negative star masked out of the relative SR."""
+    import datetime as dt
+    xml = ('<DRF><dataset Name="s261025_a004002" /><module Name="Subtract '
+           'Frame" CalibrationFile="/x/SPEC/raw/s261025_a004003.fits" />'
+           '</DRF>')
+    h = ifs_header()
+    for i in range(0, len(xml), 60):
+        h.add_comment("DRFC" + xml[i:i + 60])
+    assert osiris_orp.subtracted_frame(h) == "s261025_a004003"
+    assert osiris_orp.subtraction_kind("s261025_a004002", "s261025_a004003") == "pair"
+    assert osiris_orp.subtraction_kind("s261025_a004002", "s261024_a002003") == "other-night"
+    assert osiris_orp.parse_drf(xml) == ("s261025_a004002", "s261025_a004003")
+    now = dt.datetime(2026, 10, 25, 12, 0, 0)
+    t = lambda s_ago: now - dt.timedelta(seconds=s_ago)
+    raw = {"s261025_a001002": t(900), "s261025_a001003": t(880),
+           "s261025_a002002": t(800), "s261025_a002003": t(780),
+           "s261025_a003002": t(600), "s261025_a004002": t(100),
+           "s261025_a005002": t(5)}
+    drfs = {"s261025_a001003": ("done", t(870), "s261025_a001002", "s261025_a001003"),
+            "s261025_a002003": ("failed", t(770), "s261025_a002002", "s261025_a002003")}
+    miss = osiris_orp.missing_cubes(raw, {"s261025_a001002"}, drfs, now)
+    assert miss == [("s261025_a002002", "its ORP reduction FAILED (drf/...failed)"),
+                    ("s261025_a003002", "the pipeline was not given it (no ORP reduction file)")], miss
+    print("  [ok] ORP: subtraction from the header's DRF; missing cubes "
+          "(failed, never given; the partner sky and the recent left out)")
+    one, dq = ifs_cube(20, 24.4, 20.3, sigma_mas=8.0)
+    neg, _ = ifs_cube(20, 24.4 - 21.0, 20.3, sigma_mas=8.0)
+    p = osiris_ifs.ifs_frame_params(ifs_header(scale="0.020"), 2.17)
+    c1 = osiris_ifs.IfsCube(one, dq == 9, ifs_header(scale="0.020"), np.full(40, 2.17))
+    c2 = osiris_ifs.IfsCube(one - neg + 2.0, dq == 9, ifs_header(scale="0.020"), np.full(40, 2.17))
+    r1 = osiris_ifs.measure_ifs(*osiris_ifs.collapse(c1), p)
+    r2 = osiris_ifs.measure_ifs(*osiris_ifs.collapse(c2), p)
+    assert "negative image (A-B)" in r2.note and r1.note == ""
+    assert abs(r2.strehl - r1.strehl) < 0.03 * r1.strehl, (r1.strehl, r2.strehl)
+    print(f"  [ok] A-B cube: negative star 0.42\" away masked, relative SR "
+          f"{r2.strehl:.3f} vs {r1.strehl:.3f} for the star alone")
+
+
 def check_estimator_worker():
     """The Measured SR worker measures an IFU cube whole, the same way as
     PyAO's strehl_tool (osiris_ifs.measure_ifs), and refuses a raw frame."""
@@ -322,6 +362,7 @@ def main():
     check_coadds()
     check_ifs()
     check_latest_and_psf()
+    check_orp()
     check_estimator_worker()
     print("gui_phase56: PASS")
 

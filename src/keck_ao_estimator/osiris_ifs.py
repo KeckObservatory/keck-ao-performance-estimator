@@ -36,6 +36,14 @@ photometry footprint's share on invalid spaxels is the EDGE fraction.
 Pupil: the OSIRIS imager tool's -- the open Keck pupil at 38 deg
 (osiris.py) -- so the two OSIRIS modes share one reference.
 
+An A-B cube (the ORP subtracted the dither partner: osiris_orp) also holds
+the star NEGATIVE where it was in the partner, 0.3-1" away. A negative image
+IFS_MIN_PEAK_SIGMA below the field and within reach of the sky annulus is
+left out (spaxels within IFS_NEG_MASK_ARCSEC of it are treated as invalid
+for the sky, the photometry and the model fit), and the note says so; when
+the mask reaches into the photometry aperture the note gives the share
+masked: the SR is biased high, and not usable above 10 %.
+
 A cube without its star (dithered off the field) is refused: the star's
 spaxel must stand IFS_MIN_PEAK_SIGMA (8) robust sigma above the median of
 the valid spaxels (20 ORP cubes of 2026-07-14 / 10-20 / 10-21: no star
@@ -48,7 +56,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-__all__ = ["IFS_GOOD_DQ", "IFS_MIN_PEAK_SIGMA", "IFS_PHOTOMETRY_ARCSEC", "IFS_SKY_INNER_ARCSEC",
+__all__ = ["IFS_GOOD_DQ", "IFS_MIN_PEAK_SIGMA", "IFS_NEG_MASK_ARCSEC", "IFS_PHOTOMETRY_ARCSEC", "IFS_SKY_INNER_ARCSEC",
            "IFS_SKY_OUTER_ARCSEC", "IFS_PEAK_ARCSEC", "IFS_DEFAULT_BIN",
            "IfsCube", "is_ifs_cube", "is_ifs_raw", "spaxel_scale_mas",
            "wavelengths_um", "channel_bins", "bin_label", "read_cube", "collapse",
@@ -62,6 +70,9 @@ IFS_SKY_OUTER_ARCSEC = 0.40
 IFS_PEAK_ARCSEC = 0.10
 IFS_DEFAULT_BIN = 25            # channels per wavelength plane
 IFS_MIN_SKY_SPAXELS = 8         # fewer valid annulus spaxels: sky = 0
+IFS_NEG_MASK_ARCSEC = 0.15      # an A-B cube's negative star: spaxels this
+                                # close to it are left out of the SR and fit
+IFS_NEG_APERTURE_MAX = 0.10     # more of the SR aperture masked: SR not usable
 IFS_MIN_PEAK_SIGMA = 8.0        # the star's spaxel above the median of the
                                 # valid ones, in robust sigma (MAD): else
                                 # there is no star in the field
@@ -273,6 +284,27 @@ def measure_ifs(image, valid, params, pos=None,
     if signif < IFS_MIN_PEAK_SIGMA:
         return _failed(params, f"no star: the spaxel at ({x0:.0f}, {y0:.0f}) is {signif:.1f} sigma above the "
                                f"field (< {IFS_MIN_PEAK_SIGMA:g}) -- is the star in the IFU field?")
+    # an A-B cube's negative star near enough to touch the sky annulus: masked
+    notes = []
+    field_valid = valid
+    if mad > 0:
+        neg = np.where(valid, smooth, np.inf)
+        jy, jx = np.unravel_index(int(np.argmin(neg)), neg.shape)
+        depth = (med - float(smooth[jy, jx])) / mad
+        d_neg = float(np.hypot(jx - x0, jy - y0)) * ps / 1000.0
+        if depth >= IFS_MIN_PEAK_SIGMA and d_neg <= bg_outer_arcsec + IFS_NEG_MASK_ARCSEC:
+            rr_neg = np.hypot(np.arange(image.shape[1])[None, :] - jx,
+                              np.arange(image.shape[0])[:, None] - jy) * ps / 1000.0
+            valid = valid & (rr_neg > IFS_NEG_MASK_ARCSEC)
+            note = (f"negative image (A-B) {d_neg:.2f}\" away left out (r {IFS_NEG_MASK_ARCSEC:.2f}\")")
+            aperture = field_valid & (np.hypot(np.arange(image.shape[1])[None, :] - x0,
+                                               np.arange(image.shape[0])[:, None] - y0) * ps / 1000.0
+                                      <= photometry_radius_arcsec)
+            share = float((aperture & ~valid).sum()) / max(int(aperture.sum()), 1)
+            if share > 0:
+                note += (f": {100 * share:.0f} % of the SR aperture masked, the SR is "
+                         + ("NOT usable" if share > IFS_NEG_APERTURE_MAX else "biased high"))
+            notes.append(note)
     yy, xx = np.indices(image.shape)
     rr = np.hypot(xx - x0, yy - y0) * ps / 1000.0
     ring = valid & (rr >= bg_inner_arcsec) & (rr <= bg_outer_arcsec)
@@ -301,19 +333,22 @@ def measure_ifs(image, valid, params, pos=None,
                     np.arange(canvas.shape[0])[:, None] - r.y) \
         <= bg_outer_arcsec * 1000.0 / ps
     vcanvas = np.zeros(canvas.shape, dtype=bool)
-    vcanvas[pad:-pad, pad:-pad] = valid
+    vcanvas[pad:-pad, pad:-pad] = field_valid      # EDGE: the field's edge, not a masked negative image
     n_disc = int(disc.sum())
     edge = 1.0 - float((disc & vcanvas).sum()) / n_disc if n_disc else 1.0
     from .model_fwhm import fit_model_fwhm
     fit = fit_model_fwhm(image, x, y, ps, params.effwave_um, valid=valid,
                          pmsname=params.pmsname, pmrangl_deg=params.pmrangl_deg)
     if fit.ok:
-        fwhm, fwhm_dl, note = fit.fwhm_mas, fit.fwhm_dl_mas, fit.note
+        fwhm, fwhm_dl = fit.fwhm_mas, fit.fwhm_dl_mas
+        if fit.note:
+            notes.append(fit.note)
     else:
         fwhm, fwhm_dl = r.fwhm_mas, dl_fwhm_mas(params, dl_psf,
                                                  peak_radius_arcsec, idl)
-        note = (f"model FWHM unavailable ({fit.note}): FWHM is the tools' "
-                "find_peak value, which depends on the spaxel phase here")
-    return replace(r, x=float(x), y=float(y), sky_mode=ifs_sky_mode(n_sky),
+        notes.append(f"model FWHM unavailable ({fit.note}): FWHM is the tools' "
+                     "find_peak value, which depends on the spaxel phase here")
+    sky_mode = ifs_sky_mode(n_sky) + (" (negative image masked)" if field_valid is not valid else "")
+    return replace(r, x=float(x), y=float(y), sky_mode=sky_mode,
                    mode="ifs", edge_clip=float(edge), fwhm_mas=float(fwhm),
-                   fwhm_dl_mas=float(fwhm_dl), note=note)
+                   fwhm_dl_mas=float(fwhm_dl), note="; ".join(notes))
