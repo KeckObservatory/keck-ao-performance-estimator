@@ -63,7 +63,7 @@ class _Grid:
     wavelength and pupil, and the transfer functions of the model."""
 
     def __init__(self, plate_scale_mas, effwave_um, pmsname, pmrangl_deg,
-                 n_coarse):
+                 n_coarse, daytime=False):
         from .nirc2_psf import nirc2_dl_psf
         self.ps = float(plate_scale_mas)
         self.q = max(1, int(np.ceil(self.ps / FINE_PIXEL_MAS)))
@@ -72,7 +72,7 @@ class _Grid:
         n += n % 2
         self.n = n
         psf = nirc2_dl_psf("narrow", pmsname, effwave_um, pmrangl_deg,
-                           npix=n, pos=(0.5, 0.5),
+                           npix=n, pos=(0.5, 0.5), daytime=daytime,
                            plate_scale_mas=self.fine_mas)
         self.otf = np.fft.fft2(np.fft.ifftshift(psf))   # core at the origin
         f = np.fft.fftfreq(n)                   # cycles per fine pixel
@@ -121,14 +121,15 @@ class _Grid:
 _GRIDS = {}
 
 
-def _grid(plate_scale_mas, effwave_um, pmsname, pmrangl_deg, n_coarse):
+def _grid(plate_scale_mas, effwave_um, pmsname, pmrangl_deg, n_coarse,
+          daytime=False):
     key = (round(plate_scale_mas, 3), round(effwave_um, 5), pmsname,
-           round(pmrangl_deg, 2), int(n_coarse))
+           round(pmrangl_deg, 2), int(n_coarse), bool(daytime))
     if key not in _GRIDS:
         if len(_GRIDS) > 32:
             _GRIDS.clear()
         _GRIDS[key] = _Grid(plate_scale_mas, effwave_um, pmsname,
-                            pmrangl_deg, n_coarse)
+                            pmrangl_deg, n_coarse, daytime=daytime)
     return _GRIDS[key]
 
 
@@ -139,15 +140,16 @@ def _fit_window(plate_scale_mas, effwave_um):
 
 
 def optical_dl_fwhm_mas(plate_scale_mas, effwave_um, pmsname="open",
-                        pmrangl_deg=0.0):
-    """The diffraction-limited optical FWHM (mas) the fit compares with."""
+                        pmrangl_deg=0.0, daytime=False):
+    """The diffraction-limited optical FWHM (mas) the fit compares with
+    (`daytime`: NIRC2's PCU fiber reference, nirc2_psf)."""
     _r, n, _ld = _fit_window(plate_scale_mas, effwave_um)
     return _grid(plate_scale_mas, effwave_um, pmsname, pmrangl_deg,
-                 n).optical_fwhm(0.0)
+                 n, daytime=daytime).optical_fwhm(0.0)
 
 
 def fit_model_fwhm(image, x, y, plate_scale_mas, effwave_um, valid=None,
-                   pmsname="open", pmrangl_deg=0.0):
+                   pmsname="open", pmrangl_deg=0.0, daytime=False):
     """Fit the blurred, pixel-integrated diffraction-limited PSF to the core
     of the star near (x, y) in `image` (pixels; `valid` marks usable ones)
     and return a ModelFwhm (module docstring). The part of the fit window
@@ -155,7 +157,8 @@ def fit_model_fwhm(image, x, y, plate_scale_mas, effwave_um, valid=None,
     field is 16 spaxels wide); the note says how much of the core was used
     when more than 10 % was not. ok is False, with the reason in note, when
     the star is off the image, fewer than 8 core pixels are usable or the
-    fit fails."""
+    fit fails. `daytime` fits NIRC2's PCU fiber reference (the 11.0 m
+    circle blurred by the fiber mode) instead of the Keck pupil's."""
     from scipy.optimize import least_squares
     image = np.asarray(image, dtype=float)
     valid = np.ones(image.shape, bool) if valid is None else np.asarray(valid, bool)
@@ -180,7 +183,7 @@ def fit_model_fwhm(image, x, y, plate_scale_mas, effwave_um, valid=None,
     if use.sum() < 8:
         return ModelFwhm(False, note=f"only {int(use.sum())} valid pixels in the core")
     clipped = 1.0 - float(use.sum()) / float(core.sum())
-    g = _grid(plate_scale_mas, effwave_um, pmsname, pmrangl_deg, n)
+    g = _grid(plate_scale_mas, effwave_um, pmsname, pmrangl_deg, n, daytime=daytime)
     data = win[use]
     edge = win[ok & (rr > r_px - 1.0)] if (ok & (rr > r_px - 1.0)).any() else data
     b0 = float(np.median(edge))

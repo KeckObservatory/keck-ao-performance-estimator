@@ -211,6 +211,12 @@ def check_ifs():
     assert inst.apertures == (0.25, 0.30, 0.40, 0.1)
     assert instruments.get("nirc2").coadds_file == "unp"
     assert instruments.get("osiris").coadds_file == ""
+    from keck_ao_estimator.osiris import osiris_daytime
+    pcu = fits.Header({"CURRINST": "MOSFIRE", "INSTR": "imag", "IFILTER": "Kn3",
+                       "PCUNAME": "osimg", "AXESTAT": "not controlling"})
+    assert osiris_daytime(pcu) and instruments.get("osiris").frame_params(pcu).daytime
+    assert not osiris_daytime(fits.Header({"PCUNAME": "telescope"}))
+    assert not osiris_daytime(fits.Header({"PCUNAME": "osimg", "AXESTAT": "tracking"}))
     mos = fits.Header({"CURRINST": "MOSFIRE", "INSTR": "imag"})     # osrseng 2026-10-25
     assert instruments.identify(mos) is instruments.get("osiris")
     assert instruments.identify_frame(fits.Header({"CURRINST": "MOSFIRE"}),

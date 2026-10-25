@@ -9,10 +9,16 @@ only the front end differs:
   'osimg' 20.34 mas entry in the PSF model is the pre-upgrade imager);
 - wavelength from the IFILTER header card via the tool's inline table
   (from the OSIRIS filter index page), NOT EFFWAVE;
-- the reference PSF is always the OPEN pupil at the tool's pinned 38 deg
+- the reference PSF is the OPEN pupil at the tool's pinned 38 deg on sky
   (its own TODOs mark pupil handling unfinished -- we mirror, not
-  improve), and the K1 white-light source (sfp) is a plain 11.14 m
-  circular pupil;
+  improve); the K1 white-light source (sfp, a launch option of the IDL
+  widget) is a plain 11.14 m circular pupil;
+- a frame lit by the K1 PCU's fiber (PCUNAME other than 'telescope', the
+  telescope not tracking: osiris_daytime) gets NIRC2's daytime reference
+  instead -- the 11.0 m circle blurred by the fiber's mode field (Eduardo
+  2026-10-25: "it should"; the IDL tool has no daytime model and read SR
+  1.05 / 1.00 on the osrseng PCU frames of 2026-10-25, 0.86 / 0.82 now). The
+  fiber mode field is the K2 PCU's (10.4 / 12.6 um): K1's is not verified;
 - no flat, no bad-pixel mask, and no saturation ceiling: reduction is
   (image - background) followed by fix_image auto bad-pixel repair.
 """
@@ -59,6 +65,20 @@ def detect_instrument(header):
     return ""
 
 
+def osiris_daytime(header):
+    """True for a frame lit by the K1 PCU's fiber source: PCUNAME names a PCU
+    position other than 'telescope' ('osimg' on the osrseng frames of
+    2026-10-25) and the telescope is not tracking (AXESTAT). K1 headers carry
+    no AOHATCH, NIRC2's second condition; frames without PCUNAME (older ones)
+    are on sky. OSIRIS (K1) only: on K2 the PCU is also used at night
+    (Eduardo 2026-10-25), so NIRC2 keeps the IDL rule (PCU in AND the AO
+    hatch closed) and ORKID reads AXESTAT alone -- never the PCU alone."""
+    pcu = str(header.get("PCUNAME", "") or "").replace(" ", "").lower()
+    if pcu in ("", "telescope"):
+        return False
+    return str(header.get("AXESTAT", "") or "").strip().lower() != "tracking"
+
+
 def osiris_frame_params(header, sfp=False):
     """Extract measurement parameters from an OSIRIS imager header,
     mirroring the K1 tool's find_strehl.pro.  Returns the same params
@@ -87,7 +107,7 @@ def osiris_frame_params(header, sfp=False):
         pmrangl_deg=OSIRIS_PMRANGL_DEG,
         coadds=coadds,
         max_counts=float("inf"),            # no saturation check in the tool
-        daytime=False,
+        daytime=osiris_daytime(header),     # PCU fiber: NIRC2's daytime reference
         plate_scale_mas=OSIRIS_PLATE_SCALE_MAS,
         utc=utc,
         object_name=str(header.get("OBJECT", "")).strip(),
