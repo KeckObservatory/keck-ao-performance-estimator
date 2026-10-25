@@ -193,6 +193,7 @@ def check_ifs():
     assert osiris_ifs.channel_bins(40, 10) == [(0, 10), (10, 20), (20, 30), (30, 40)]
     assert osiris_ifs.channel_bins(43, 10)[-1] == (30, 43)
     assert osiris_ifs.channel_bins(46, 10)[-1] == (40, 46)
+    assert osiris_ifs.bin_label(cube.wavelengths_um, 10, 20) == "λc 2.1572 µm (10 ch)"
     print("  [ok] ORP cube: DQ 9 good, mean over good channels, bins, axis")
     inst = instruments.get("osiris_ifs")
     assert instruments.identify(hdr) is inst and inst.is_ifs

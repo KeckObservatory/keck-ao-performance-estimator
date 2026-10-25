@@ -36,7 +36,7 @@ import keck_ao_estimator as engine
 from keck_ao_estimator import session_log
 
 from ..theme import set_cue
-from ..widgets import SortableItem, _dspin, _shrinkable_label
+from ..widgets import LogView, SortableItem, _dspin, _shrinkable_label
 from ..workers import (CatalogFetchWorker, FieldMeasureWorker,
                        FieldPrologueWorker, FrameWatchWorker,
                        KeckNetworkCheck, LatestNightWorker,
@@ -814,7 +814,7 @@ class Nirc2StrehlTabMixin:
         log_row.addWidget(self.n2_log_popout)
         bottom_v.addLayout(log_row)
 
-        self.n2_log = QtWidgets.QPlainTextEdit()
+        self.n2_log = LogView()
         self.n2_log.setReadOnly(True)
         self.n2_log.setMaximumBlockCount(500)
         self.n2_log.setLineWrapMode(

@@ -51,7 +51,7 @@ import numpy as np
 __all__ = ["IFS_GOOD_DQ", "IFS_MIN_PEAK_SIGMA", "IFS_PHOTOMETRY_ARCSEC", "IFS_SKY_INNER_ARCSEC",
            "IFS_SKY_OUTER_ARCSEC", "IFS_PEAK_ARCSEC", "IFS_DEFAULT_BIN",
            "IfsCube", "is_ifs_cube", "is_ifs_raw", "spaxel_scale_mas",
-           "wavelengths_um", "channel_bins", "read_cube", "collapse",
+           "wavelengths_um", "channel_bins", "bin_label", "read_cube", "collapse",
            "display_image", "ifs_frame_params", "ifs_dl_psf", "dl_fwhm_mas",
            "measure_ifs", "ifs_sky_mode"]
 
@@ -128,6 +128,13 @@ def channel_bins(nchan, width):
         bins[-2] = (bins[-2][0], nchan)
         bins.pop()
     return bins
+
+
+def bin_label(wavelengths_um, lo, hi):
+    """'λc 2.1612 µm (25 ch)': the central wavelength of channels lo:hi (the
+    mean of theirs, the wavelength the bin is measured at) and how many."""
+    wl = float(np.mean(np.asarray(wavelengths_um)[lo:hi]))
+    return f"λc {wl:.4f} µm ({hi - lo} ch)"
 
 
 def read_cube(path):

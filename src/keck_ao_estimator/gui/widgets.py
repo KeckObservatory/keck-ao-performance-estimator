@@ -6,7 +6,7 @@ _dspin (a QDoubleSpinBox factory), _shrinkable_label, and SortableItem
 import numpy as np
 import astropy.units as u
 
-from qtcompat import QtCore, QtWidgets, Qt, Signal
+from qtcompat import QtCore, QtGui, QtWidgets, Qt, Signal
 
 import keck_ao_estimator as engine
 
@@ -106,6 +106,30 @@ class TimeEdit(QtWidgets.QLineEdit):
 
     def setDisplayFormat(self, _fmt):
         pass                              # QTimeEdit-API compatibility
+
+
+class LogView(QtWidgets.QPlainTextEdit):
+    """The read-only, unwrapped Measured-SR log. A new line, and the
+    window's first show, leave the sideways scroll where it was -- at the
+    left unless the user moved it right (QPlainTextEdit scrolls its cursor
+    into view on its first show, and an appended line leaves the cursor at
+    the end of that line: the log opened scrolled to the far right). The
+    vertical scroll follows new lines while it is at the bottom and stays
+    put when scrolled up. In sync with PyAO's strehl_tool (Eduardo
+    2026-10-25)."""
+
+    def appendPlainText(self, text):
+        hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
+        h, v = hbar.value(), vbar.value()
+        at_bottom = v >= vbar.maximum()
+        super().appendPlainText(text)
+        cursor = self.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.StartOfBlock)
+        self.setTextCursor(cursor)
+        hbar.setValue(h)
+        if not at_bottom:
+            vbar.setValue(v)
 
 
 class SortableItem(QtWidgets.QTableWidgetItem):
