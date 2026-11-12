@@ -170,6 +170,8 @@ def gui_tab():
     win.tel_k1.setChecked(True); pump(300)
     assert win.sc_tel.currentText() == "K1"       # follows the Data tab
     win.sc_mode.setCurrentText("LTAO")
+    assert win.sc_law.currentText() == "Hardy"    # the tab's default
+    win.sc_law.setCurrentText("Maréchal")         # the checks below
     win.pred_enable.setChecked(True); pump(300)
     tabs.setCurrentIndex(last); pump(300)
     label, res = win._sc_last

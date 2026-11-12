@@ -1126,6 +1126,10 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
             "sc_field": self.sc_field.currentData(),
             "sc_kaon": self.sc_kaon.isChecked(),
             "sc_logx": self.sc_logx.isChecked(),
+            "sc_view": self.sc_view.currentText(),
+            "sc_level": self.sc_level.value(),
+            "sc_laser": self.sc_laser.value(),
+            "sc_truth": self.sc_truth.isChecked(),
             "fm_osiris_mode": self.fm_osiris_mode.currentText(),
             "fm_osiris_scale": self.fm_osiris_scale.currentText(),
             "fm_osiris_lenslet": self.fm_osiris_lenslet.currentText(),
@@ -1313,6 +1317,11 @@ class MainWindow(DataTabMixin, FaGeometryMixin, TargetTabMixin,
                 float(c.get("sc_patrol", engine.PATROL_RADIUS_ARCSEC)))))
             self.sc_kaon.setChecked(bool(c.get("sc_kaon", False)))
             self.sc_logx.setChecked(bool(c.get("sc_logx", False)))
+            self.sc_view.setCurrentText(c.get("sc_view", "Curve"))
+            self.sc_level.setValue(float(c.get("sc_level", 0.30)))
+            self.sc_laser.setValue(float(c.get("sc_laser",
+                                               engine.LASER_TT_MAS)))
+            self.sc_truth.setChecked(bool(c.get("sc_truth", True)))
             self.fm_osiris_mode.setCurrentText(
                 c.get("fm_osiris_mode", self.fm_osiris_mode.currentText()))
             self.fm_osiris_scale.setCurrentText(

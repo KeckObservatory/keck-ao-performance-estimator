@@ -3,6 +3,41 @@
 All notable changes to KAPE, the Keck AO Performance Estimator. The
 project is released on GitHub only (pin `@v1.6.0` in the install URL).
 
+## Unreleased
+
+**Sky coverage over the whole sky, as a curve and a map.** The Sky coverage
+tab gains an **All sky, dec ≥ −40° (Gaia DR3)** field.
+- **Data:** 821 equal-area sight lines with Gaia DR3 counts, 0.2 MB.
+- **Magnitudes:** R from a Gaia colour term; H and K from Gaia colours fitted
+  to 2MASS, plus the 2MASS stars Gaia lacks.
+- **Method:** field-star statistics on the same Strehl surface as the curves.
+  On the bundled fields it agrees with the Monte Carlo to 0.008.
+
+With it come four additions:
+- **View → Map:** an equatorial Mollweide map of where a Strehl level is
+  reached.
+- **TRICK (H / K) on the All-sky field** keeps STRAP as a fallback: a star
+  counts when either sensor reaches the Strehl with it (K1).
+- **TT sensor → PolyChroLGS TT:** a polychromatic-laser tip-tilt source of fixed residual,
+  default 20 mas, in place of a tip-tilt star.
+- **R ≤ 19 truth star:** an option, on by default, that every LGS option needs
+  for focus and truth sensing.
+
+Also on the tab:
+- **Hardy is now the default tilt Strehl law** (Maréchal is one click away;
+  the rest of the estimator still uses Maréchal).
+- **The model is named:** the tab and every title say the curves come from
+  the KAPE engine, not the analytic error-budget sheet.
+
+Engine and tests:
+- **Engine:** `sky_map.py` (`allsky_coverage`, `draw_sky_map`,
+  `laser_strehl`); `lgs_budget_terms` / `lgs_strehl` take `tt_fixed_nm`
+  (None, the default, is byte-identical).
+- **Data builder:** `sr_estimator/build_sky_map.py`.
+- **Regression:** `gui_phase58` pins the whole-sky fractions at the 20-mas
+  Strehl to an independent per-star calculation (STRAP 0.155, TRICK with
+  STRAP fallback 0.411, truth star 0.888).
+
 ## 1.6.0 — 2026-10-25
 
 **The tool is now called KAPE.** Window title, About box, README and CLI help

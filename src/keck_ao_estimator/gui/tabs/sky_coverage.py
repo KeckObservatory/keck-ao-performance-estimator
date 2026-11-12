@@ -4,7 +4,8 @@ conditions the estimator is using -- the Prediction tab's scenario when it is
 enabled, else the loaded night at the Field map tab's Conditions selection.
 Every other model setting (LGS offset, winds, NGS fit, WFE sliders, science
 band) is read from the left dock. The physics lives in
-keck_ao_estimator.sky_coverage.
+keck_ao_estimator.sky_coverage (bundled sight lines) and
+keck_ao_estimator.sky_map (the whole sky: curve and map).
 """
 import copy
 from types import SimpleNamespace
@@ -18,6 +19,19 @@ import keck_ao_estimator as engine
 _MODES = {"NGS": "ngs", "single-LGS": "single", "LTAO": "ltao"}
 _LAWS = {"Maréchal": "marechal", "Hardy": "hardy"}
 _CATALOGUE = {"R": "Gaia G as R", "H": "2MASS H", "K": "2MASS K"}
+_CATALOGUE_ALLSKY = {"R": "Gaia DR3 R ≤ 19",
+                     "H": "TRICK H ≤ 17 or STRAP R ≤ 19 (Gaia DR3; H from "
+                          "colours + 2MASS)",
+                     "K": "TRICK K ≤ 17 or STRAP R ≤ 19 (Gaia DR3; K from "
+                          "colours + 2MASS)"}
+# whose model the tab draws (Eduardo, 2026-11-10: say so plainly)
+MODEL_NOTE = (f"Model: the KAPE {engine.__version__} engine (its own Strehl "
+              "budget and tip-tilt rows), not the analytic error-budget "
+              "sheet")
+PLGS_LABEL = "PolyChroLGS TT"   # the fixed laser tip-tilt option
+# whole-sky-only guide options: label -> (--tt-sensor, sky_map sensor)
+_ALLSKY_SENSORS = {PLGS_LABEL: ("strap", "laser")}
+_VIEWS = ("Curve", "Map")
 
 
 class SkyCoverageTabMixin:
@@ -43,29 +57,43 @@ class SkyCoverageTabMixin:
             "magnitude, isoplanatic fall-off with its offset). single-LGS / "
             "LTAO: each star is tried as the tip-tilt star.")
         self.sc_sensor = QtWidgets.QComboBox()
-        self.sc_sensor.addItems(list(self._TT_SENSOR_MAP))
+        self.sc_sensor.addItems(list(self._TT_SENSOR_MAP)
+                                + list(_ALLSKY_SENSORS))
         self.sc_sensor.setToolTip(
             "Tip-tilt sensor for single-LGS / LTAO. TRICK is K1-only and "
-            "its dichroic puts the science band in the other of H / K.")
+            "its dichroic puts the science band in the other of H / K.\n"
+            "On the All-sky field TRICK keeps STRAP as a fallback (K1 has "
+            "both): a star counts when either sensor reaches the Strehl "
+            "with it, in practice the same as TRICK alone.\n"
+            f"{PLGS_LABEL} (whole sky only; picking it selects the All-sky "
+            "field): a polychromatic-laser tip-tilt source with the "
+            "residual set below, the same everywhere on the sky, in place "
+            "of a natural tip-tilt star.")
         self.sc_law = QtWidgets.QComboBox()
         self.sc_law.addItems(list(_LAWS))
+        self.sc_law.setCurrentText("Hardy")
         self.sc_law.setToolTip(
-            "Strehl factor of the tip-tilt residual. Maréchal exp(−x²) is "
-            "what the rest of the estimator uses and what the tip-tilt "
-            "sensor rows were calibrated through. Hardy 1/(1+x²) is the "
-            "form KAON 1303 / 1318 use: pick it to read a curve against "
-            "theirs. It is a convention what-if, not a second calibrated "
-            "prediction, and it reads higher at large sky fractions. NGS "
-            "has no separate tilt term, so it does not apply there.")
+            "Strehl factor of the tip-tilt residual. Hardy 1/(1+x²), this "
+            "tab's default, is the form KAON 1303 / 1318 use. Maréchal "
+            "exp(−x²) is what the rest of the estimator uses and what the "
+            "tip-tilt sensor rows were calibrated through; Hardy reads "
+            "higher at large sky fractions. NGS has no separate tilt term, "
+            "so it does not apply there.")
         self.sc_field = QtWidgets.QComboBox()
+        self.sc_field.addItem(engine.ALLSKY_LABEL, engine.ALLSKY_FIELD)
         for tag, (_l, _b, label) in engine.SKY_FIELDS.items():
             self.sc_field.addItem(label, tag)
         self.sc_field.setCurrentIndex(
             self.sc_field.findData(engine.DEF_SKY_FIELD))
         self.sc_field.setToolTip(
-            "Star field the pointings are drawn on. Gaia + 2MASS: the real "
-            "stars (Gaia DR2 G < 20.5, 2MASS) in a 0.5° cone on that sight "
-            "line. Synthetic: a random field matched to the star counts "
+            "Star field the pointings are drawn on.\n"
+            "· All sky: 821 sight lines over dec ≥ −40°, Gaia DR3 counts "
+            "with colour terms (R; H and K fitted to 2MASS), field-star "
+            "statistics; the curve is the whole sky's and the Map view "
+            "shows where.\n"
+            "· Gaia + 2MASS: the real stars (Gaia DR2 G < 20.5, 2MASS) in a "
+            "0.5° cone on that sight line.\n"
+            "· Synthetic: a random field matched to the star counts "
             "KAON 1303 publishes for its Besançon-model fields at b = 60° "
             "(0.40 usable stars / arcmin², power-law magnitudes). It is the "
             "kind of supply the KAON 1303 / 1318 curves were computed on, "
@@ -120,15 +148,75 @@ class SkyCoverageTabMixin:
                     self.sc_logx):
             row2.addWidget(wdg)
         row2.addStretch(1)
+
+        self.sc_view = QtWidgets.QComboBox()
+        self.sc_view.addItems(list(_VIEWS))
+        self.sc_view.setToolTip(
+            "Curve: Strehl vs sky fraction. Map: where on the sky the "
+            "Strehl below is reached, as the share of pointings at each of "
+            "the 821 sight lines (picking it selects the All-sky field).")
+        self.sc_level = QtWidgets.QDoubleSpinBox()
+        self.sc_level.setRange(0.05, 0.95)
+        self.sc_level.setSingleStep(0.05)
+        self.sc_level.setDecimals(2)
+        self.sc_level.setValue(0.30)
+        self.sc_level.setKeyboardTracking(False)
+        self.sc_level.setToolTip("Strehl the Map view shows the chance of "
+                                 "reaching, at the science band in use.")
+        self.sc_laser = QtWidgets.QDoubleSpinBox()
+        self.sc_laser.setRange(1.0, 100.0)
+        self.sc_laser.setSingleStep(1.0)
+        self.sc_laser.setDecimals(1)
+        self.sc_laser.setSuffix(" mas")
+        self.sc_laser.setValue(engine.LASER_TT_MAS)
+        self.sc_laser.setKeyboardTracking(False)
+        self.sc_laser.setToolTip(
+            f"One-axis tip-tilt residual of the {PLGS_LABEL} option, in "
+            "place of the tip-tilt star's whole TT budget. 20 mas is the "
+            "polychromatic-laser goal.")
+        self.sc_truth = QtWidgets.QCheckBox(
+            f"R ≤ {engine.TRUTH_MAG:g} truth star")
+        self.sc_truth.setChecked(True)
+        self.sc_truth.setToolTip(
+            "All sky, single-LGS / LTAO: every option also needs an "
+            f"R ≤ {engine.TRUTH_MAG:g} star anywhere in the patrol field for "
+            "focus / truth sensing (its offset not penalized). A STRAP "
+            "star that reaches the Strehl is one already; a TRICK star or "
+            f"{PLGS_LABEL} need one. Off: no such requirement.")
+        row3 = QtWidgets.QHBoxLayout()
+        self.sc_level_label = QtWidgets.QLabel("Map: Strehl ≥")
+        self.sc_laser_label = QtWidgets.QLabel(f"{PLGS_LABEL}:")
+        for wdg in (QtWidgets.QLabel("View:"), self.sc_view,
+                    self.sc_level_label, self.sc_level, self.sc_laser_label,
+                    self.sc_laser, self.sc_truth):
+            row3.addWidget(wdg)
+        row3.addStretch(1)
+        self.sc_model_label = QtWidgets.QLabel(
+            f"KAPE {engine.__version__} engine — not the analytic "
+            "error-budget sheet")
+        self.sc_model_label.setStyleSheet("color: #52514e;")
+        self.sc_model_label.setToolTip(
+            "Every curve and map on this tab comes from the estimator's "
+            "own Strehl model: the field map's on-axis budget with KAPE's "
+            "calibrated STRAP / TRICK tip-tilt rows (tiptilt.py), under "
+            "the conditions in use. It is not the analytic error-budget "
+            "spreadsheet, whose tip-tilt measurement rows are lower.")
+        row3.addWidget(self.sc_model_label)
         holder["layout"].insertLayout(0, row)
         holder["layout"].insertLayout(1, row2)
+        holder["layout"].insertLayout(2, row3)
 
-        for combo in (self.sc_tel, self.sc_mode, self.sc_sensor, self.sc_law,
-                      self.sc_field, self.sc_ngs_wfs, self.sc_patrol):
+        for combo in (self.sc_tel, self.sc_mode, self.sc_law,
+                      self.sc_ngs_wfs, self.sc_patrol):
             combo.currentIndexChanged.connect(self._on_skycov_input)
+        self.sc_field.currentIndexChanged.connect(self._on_skycov_field)
+        self.sc_sensor.currentIndexChanged.connect(self._on_skycov_allsky_need)
+        self.sc_view.currentIndexChanged.connect(self._on_skycov_allsky_need)
+        for spin in (self.sc_level, self.sc_laser):
+            spin.valueChanged.connect(self._on_skycov_input)
         self.ngs_wfs.currentTextChanged.connect(self.sc_ngs_wfs.setCurrentText)
-        self.sc_kaon.toggled.connect(self._on_skycov_input)
-        self.sc_logx.toggled.connect(self._on_skycov_input)
+        for box in (self.sc_kaon, self.sc_logx, self.sc_truth):
+            box.toggled.connect(self._on_skycov_input)
         self.sc_hold_btn.clicked.connect(self._skycov_hold)
         self.sc_clear_btn.clicked.connect(self._skycov_clear)
         self.tel_k1.toggled.connect(
@@ -140,23 +228,61 @@ class SkyCoverageTabMixin:
         return (hasattr(self, "_sc_holder")
                 and self.plot_tabs.currentWidget() is self._sc_holder["widget"])
 
+    def _sc_allsky(self):
+        return self.sc_field.currentData() == engine.ALLSKY_FIELD
+
+    def _sc_sensor_spec(self):
+        """(--tt-sensor value, sensing code) for the sensor selection."""
+        text = self.sc_sensor.currentText()
+        if text in _ALLSKY_SENSORS:
+            return _ALLSKY_SENSORS[text]
+        return self._TT_SENSOR_MAP[text][:2]
+
+    @staticmethod
+    def _sc_quiet(widget, setter, value):
+        widget.blockSignals(True)
+        getattr(widget, setter)(value)
+        widget.blockSignals(False)
+
     def _sync_skycov_controls(self):
         """TRICK exists on K1 only; the tip-tilt sensor and the tilt law
-        mean nothing for NGS; the NGS WFS mode is a K2 NGS choice."""
+        mean nothing for NGS; the NGS WFS mode is a K2 NGS choice; the
+        laser residual, truth star and map level only where they apply."""
         k1 = self.sc_tel.currentText() == "K1"
         lgs = self.sc_mode.currentText() != "NGS"
-        if not k1 and self.sc_sensor.currentText().startswith("TRICK"):
-            self.sc_sensor.blockSignals(True)
-            self.sc_sensor.setCurrentText("STRAP (R)")
-            self.sc_sensor.blockSignals(False)
+        if not k1 and "TRICK" in self.sc_sensor.currentText():
+            self._sc_quiet(self.sc_sensor, "setCurrentText", "STRAP (R)")
         model = self.sc_sensor.model()
         for i in range(self.sc_sensor.count()):
-            if model.item(i).text().startswith("TRICK"):
+            if "TRICK" in model.item(i).text():
                 model.item(i).setEnabled(k1)
         self.sc_sensor.setEnabled(lgs)
         self.sc_law.setEnabled(lgs)
         for wdg in (self.sc_ngs_wfs, self.sc_ngs_wfs_label):
             wdg.setEnabled(not k1 and not lgs)
+        laser = lgs and self.sc_sensor.currentText() == PLGS_LABEL
+        for wdg in (self.sc_laser, self.sc_laser_label):
+            wdg.setEnabled(laser)
+        self.sc_truth.setEnabled(lgs and self._sc_allsky())
+        for wdg in (self.sc_level, self.sc_level_label):
+            wdg.setEnabled(self.sc_view.currentText() == "Map")
+
+    def _on_skycov_field(self, *_):
+        """A bundled sight line has no map and no whole-sky options."""
+        if not self._sc_allsky():
+            self._sc_quiet(self.sc_view, "setCurrentText", "Curve")
+            if self.sc_sensor.currentText() in _ALLSKY_SENSORS:
+                self._sc_quiet(self.sc_sensor, "setCurrentText", "STRAP (R)")
+        self._on_skycov_input()
+
+    def _on_skycov_allsky_need(self, *_):
+        """The map and the whole-sky options select the All-sky field."""
+        if ((self.sc_view.currentText() == "Map"
+             or self.sc_sensor.currentText() in _ALLSKY_SENSORS)
+                and not self._sc_allsky()):
+            self._sc_quiet(self.sc_field, "setCurrentIndex",
+                           self.sc_field.findData(engine.ALLSKY_FIELD))
+        self._on_skycov_input()
 
     def _on_skycov_input(self, *_):
         self._sync_skycov_controls()
@@ -188,8 +314,7 @@ class SkyCoverageTabMixin:
         a = copy.copy(base)
         a.telescope = self.sc_tel.currentText()
         lgs = self.sc_mode.currentText() != "NGS"
-        a.tt_sensor = (self._TT_SENSOR_MAP[self.sc_sensor.currentText()][0]
-                       if lgs else "strap")
+        a.tt_sensor = self._sc_sensor_spec()[0] if lgs else "strap"
         engine.resolve_tt_sensor(a)       # TRICK: science band -> complement
         a.ngs_wfs = (self.sc_ngs_wfs.currentText() if a.telescope == "K2"
                      else engine.DEF_NGS_WFS)
@@ -219,17 +344,28 @@ class SkyCoverageTabMixin:
             return
         a, prep, snap = got
         mode = _MODES[self.sc_mode.currentText()]
-        sensor = (self._TT_SENSOR_MAP[self.sc_sensor.currentText()][1]
-                  if mode != "ngs" else "R")
+        sensor = self._sc_sensor_spec()[1] if mode != "ngs" else "R"
         law = _LAWS[self.sc_law.currentText()] if mode != "ngs" else "marechal"
+        allsky = self._sc_allsky()
         dvar = (self._ngs_delta_var(self.last_offsets, a)
                 if (mode == "ngs" and self.last_offsets) else 0.0)
         try:
             with engine.budget_overrides(**self.last_offsets):
-                res = engine.sky_coverage_curve(
-                    a, prep, snap, mode, sensor, law,
-                    self.sc_field.currentData(),
-                    patrol=self.sc_patrol.currentData(), ngs_delta_var=dvar)
+                if allsky:
+                    # TRICK keeps STRAP as a fallback (see the tooltip)
+                    res = engine.allsky_coverage(
+                        a, prep, snap, mode,
+                        f"R+{sensor}" if sensor in ("H", "K") else sensor,
+                        law,
+                        patrol=self.sc_patrol.currentData(),
+                        truth=self.sc_truth.isChecked(),
+                        laser_mas=self.sc_laser.value(), ngs_delta_var=dvar)
+                else:
+                    res = engine.sky_coverage_curve(
+                        a, prep, snap, mode, sensor, law,
+                        self.sc_field.currentData(),
+                        patrol=self.sc_patrol.currentData(),
+                        ngs_delta_var=dvar)
         except Exception as e:
             self._on_failed(f"sky coverage failed: {e}", "")
             return
@@ -242,37 +378,63 @@ class SkyCoverageTabMixin:
                     config += " · preliminary fit"
         else:
             config += f" · {self.sc_sensor.currentText()}"
+            if sensor == "laser":
+                config += f" {res['laser_mas']:g} mas"
             if law == "hardy":
                 config += " · Hardy tilt law"
         field = self.sc_field.currentText()
         short_field = field.split(" (")[0].split(",")[0]
         star = "guide star" if mode == "ngs" else "tip-tilt star"
+        if sensor == "laser":
+            supply = f"{PLGS_LABEL} {res['laser_mas']:g} mas everywhere"
+        elif allsky:
+            supply = (f"best {star} within {res['patrol']:g}″, "
+                      + _CATALOGUE_ALLSKY[sensor])
+        else:
+            supply = (f"best {star} within {res['patrol']:g}″, "
+                      + (f"synthetic {sensor}" if res["synthetic"]
+                         else _CATALOGUE[sensor])
+                      + f" ≤ {res['mag_limit']:g}")
+        if allsky and res["truth"]:
+            supply += (f", R ≤ {engine.TRUTH_MAG:g} truth star within "
+                       f"{res['patrol']:g}″")
+            config += " · truth star"
         title = (f"{config} — Strehl vs sky coverage at {field}\n"
-                 f"{self._fm_cond_text(snap, prep.lam_label)}\n"
-                 f"best {star} within {res['patrol']:g}″, "
-                 + (f"synthetic {sensor}" if res["synthetic"]
-                    else _CATALOGUE[sensor])
-                 + f" ≤ {res['mag_limit']:g}")
+                 f"{self._fm_cond_text(snap, prep.lam_label)}\n{supply}\n"
+                 f"{MODEL_NOTE}")
         cond = (f"predicted DIMM {snap['eps_tot_zenith']:.2f}″"
                 if snap.get("synthetic")
                 else f"seeing {snap['eps_tot_los']:.2f}″")
         if res["patrol"] != engine.PATROL_RADIUS_ARCSEC:
             short_field += f", {res['patrol']:g}″ patrol"
         label = f"{config}, {short_field}, {cond}"
-        req = None
-        if (self.sc_kaon.isChecked() and mode != "ngs"
-                and sensor in engine.KAON1318_FIG12):
-            f, s = engine.KAON1318_FIG12[sensor]
-            req = (engine.KAON1318_FIG12_LABEL, f, s)
-        fig = Figure(figsize=(8, 6), layout="constrained")
-        engine.draw_sky_coverage(
-            fig, res, title, label, self._sc_held, req,
-            log_x=self.sc_logx.isChecked(),
-            box_title="\n".join(config.split(" · ") + [short_field, cond]))
         note = self._fm_budget_note(mode, dvar)
-        if note:
-            fig.text(0.012, 0.012, note, color="#C0392B", fontweight="bold",
-                     fontsize=9, ha="left", va="bottom")
+        if allsky and self.sc_view.currentText() == "Map":
+            fig = Figure(figsize=(9, 5.8))
+            what = (PLGS_LABEL if sensor == "laser" else f"the best {star}")
+            engine.draw_sky_map(
+                fig, res, self.sc_level.value(),
+                f"{config}\n{self._fm_cond_text(snap, prep.lam_label)}\n"
+                f"{supply}\n{MODEL_NOTE}", what)
+            if note:
+                fig.text(0.012, 0.975, note, color="#C0392B",
+                         fontweight="bold", fontsize=9, ha="left", va="top")
+        else:
+            req = None
+            if (self.sc_kaon.isChecked() and mode != "ngs"
+                    and sensor in engine.KAON1318_FIG12):
+                f, s = engine.KAON1318_FIG12[sensor]
+                req = (engine.KAON1318_FIG12_LABEL, f, s)
+            fig = Figure(figsize=(8, 6), layout="constrained")
+            engine.draw_sky_coverage(
+                fig, res, title, label, self._sc_held, req,
+                log_x=self.sc_logx.isChecked(),
+                box_title="\n".join(config.split(" · ")
+                                    + [short_field, cond]))
+            if note:
+                fig.text(0.012, 0.012, note, color="#C0392B",
+                         fontweight="bold", fontsize=9, ha="left",
+                         va="bottom")
         self._sc_last = (label, res)
         self._show_figure(holder, fig)
 

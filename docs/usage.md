@@ -174,6 +174,11 @@ star within the patrol radius (brightness traded against distance), and the
 sorted results are the curve. A star at a given magnitude and offset scores exactly what the
 field map shows on axis for that star.
 
+**The model is KAPE's own engine, not the analytic error-budget sheet.** Every
+curve and map uses the estimator's Strehl budget with its calibrated STRAP /
+TRICK tip-tilt rows. The tab and every title say so. The analytic sheet's
+tip-tilt measurement rows are lower, so it predicts more sky coverage.
+
 Options on the tab:
 
 - **Telescope** — K1 or K2. It follows the Data tab's telescope and can be set
@@ -183,13 +188,13 @@ Options on the tab:
 - **K2 NGS WFS** — 57x57 or 29x29, for K2 in NGS mode. It follows the NGS
   tab's WFS mode. The 29x29 fit is preliminary.
 - **TT sensor** — STRAP (R), TRICK (H) or TRICK (K); TRICK is K1-only and puts
-  the science band in the other of H / K.
-- **Tilt Strehl** — Maréchal `exp(−x²)` or Hardy `1/(1+x²)` for the tip-tilt
-  factor. Maréchal is what the rest of the estimator uses and what the
-  tip-tilt sensor rows were calibrated through. Hardy is the form KAON 1303
-  and KAON 1318 use, so pick it to read a curve against theirs; it is a
-  convention what-if, not a second calibrated prediction, and it reads higher
-  at large sky fractions. It does not apply to NGS.
+  the science band in the other of H / K. On the All-sky field TRICK keeps
+  STRAP as a fallback (below).
+- **Tilt Strehl** — Hardy `1/(1+x²)` (this tab's default) or Maréchal
+  `exp(−x²)` for the tip-tilt factor. Hardy is the form KAON 1303 and
+  KAON 1318 use. Maréchal is what the rest of the estimator uses and what the
+  tip-tilt sensor rows were calibrated through; Hardy reads higher at large
+  sky fractions. It does not apply to NGS.
 - **Patrol** — the radius a guide star can be picked within: 60″ (the
   unvignetted radius, and the field map's field of regard) or 51″ (what
   KAON 1318 used).
@@ -223,6 +228,50 @@ limit (R ≤ 19, H / K ≤ 17).
 The real star fields are Gaia DR2 (G < 20.5) and 2MASS in 0.5° cones. Gaia G
 stands in for R, and 2MASS is complete only to H ≈ 15.1 / K ≈ 14.3, so TRICK
 curves on them are conservative where they depend on fainter stars.
+
+#### All sky, map, PolyChroLGS TT
+
+The **All sky, dec ≥ −40° (Gaia DR3)** sky field covers the whole sky the
+telescope reaches.
+- **Sight lines:** 821 of them, equal-area, about 6.4° apart, each with Gaia
+  DR3 counts in a small cone.
+- **Method:** each sight line gets the chance that its best star reaches a
+  given Strehl, from field-star (Poisson) statistics. It uses the same
+  magnitude-offset Strehl surface as the curves above. On the bundled real
+  fields, the method agrees with the 20 000-pointing Monte Carlo to within
+  0.008 in sky fraction.
+- **Curve:** the average over the sight lines is the whole sky's curve.
+- **Magnitudes:** R comes with a Gaia colour term. H and K come from Gaia
+  colours fitted to 2MASS (scatter 0.11–0.14 mag off the plane, 0.34 mag in
+  it). The 2MASS stars Gaia lacks are added back as stars only TRICK can use:
+  a quarter of the H ≤ 15.5 stars near the plane, 1–7 % elsewhere.
+
+With this field the tab adds:
+
+- **View → Map**: an equatorial Mollweide map of the share of pointings that
+  reach **Map: Strehl ≥** the level set beside it. It shows where on the sky a
+  configuration works; the title gives the sky fraction.
+- **TT sensor → TRICK (H / K)** (K1) keeps STRAP as a fallback here: a star
+  counts when either sensor reaches the Strehl with it. In practice that is
+  the same as TRICK alone, since a star STRAP can use, TRICK can too. The
+  science band is TRICK's.
+- **TT sensor → PolyChroLGS TT**: a polychromatic-laser tip-tilt source with
+  the residual set in **PolyChroLGS TT** (one-axis, default 20 mas, the polychromatic-laser goal),
+  the same everywhere. It replaces the tip-tilt star's whole TT budget; the
+  rest of the LGS budget is unchanged.
+- **R ≤ 19 truth star** (single-LGS / LTAO, on by default): every option also
+  needs an R ≤ 19 star anywhere in the patrol field for focus and truth
+  sensing. Its offset is not penalized. A STRAP star that reaches the Strehl
+  is already one; a TRICK star or the laser needs one. About 11 % of the sky
+  has none (a third at |b| > 60°).
+
+Picking the Map view or PolyChroLGS TT selects the All-sky field;
+picking a bundled field returns the view to Curve and the sensor to STRAP. The
+counts are rebuilt with `sr_estimator/build_sky_map.py`.
+
+TRICK's off-axis spot inflation is an open calibration: the model does not yet
+reproduce the measured ~20″ TRICK / STRAP crossing. TRICK curves and maps are
+therefore if anything optimistic off axis.
 
 ## Parallelism
 

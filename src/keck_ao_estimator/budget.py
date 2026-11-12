@@ -430,7 +430,7 @@ def lgs_budget_terms(eps_total, eps_freeatm, telescope, mode,
                      v_ground=V_GROUND, v_free=V_FREE, aniso_scale=1.0,
                      tt_sensor="strap", tt_spot_theta=None,
                      strap_law="sheet", ltao_tt_theta0_gain=None,
-                     lgs_flux_azel=None):
+                     lgs_flux_azel=None, tt_fixed_nm=None):
     """Per-sample LGS/LTAO error-budget terms in nm RMS, as a dict.
 
     Single source of truth for the budget: lgs_strehl() sums these in
@@ -453,6 +453,11 @@ def lgs_budget_terms(eps_total, eps_freeatm, telescope, mode,
     at that pointing, HOMEAS * F(az, el)^(-1/2) (lgs_flux.py: 1/airmass,
     extinction, geomagnetic efficiency; zenith = HOMEAS). None = the fixed
     zenith HOMEAS, unchanged. Never applied under legacy.
+
+    tt_fixed_nm: optional tip-tilt term, nm RMS, used in place of the TT
+    star's rows (tt_mag, tt_offset and the sensor are then ignored): a
+    tip-tilt source with a known residual, e.g. the sky-coverage tab's
+    laser tip-tilt what-if. None = the TT-star budget, unchanged.
     """
     fitting = FITTING_ERR[telescope]
 
@@ -518,8 +523,9 @@ def lgs_budget_terms(eps_total, eps_freeatm, telescope, mode,
         # factor as the TT-star rows. Default gain 1.0 -> no change; legacy
         # is excluded above and stays byte-faithful to the 2004 sheet.
         ang *= _gfac
-    tt = tt_wfe_nm(s_tot, tt_mag, tt_offset, tt_aniso, sensor=_tts,
-                   spot_theta=tt_spot_theta, strap_law=strap_law)
+    tt = (tt_wfe_nm(s_tot, tt_mag, tt_offset, tt_aniso, sensor=_tts,
+                    spot_theta=tt_spot_theta, strap_law=strap_law)
+          if tt_fixed_nm is None else float(tt_fixed_nm))
 
     meas = HOMEAS
     if lgs_flux_azel is not None and not legacy:
@@ -539,7 +545,7 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                v_ground=V_GROUND, v_free=V_FREE, aniso_scale=1.0,
                tt_sensor="strap", tt_spot_theta=None,
                strap_law="sheet", ltao_tt_theta0_gain=None,
-               lgs_flux_azel=None, tilt_law="marechal"):
+               lgs_flux_azel=None, tilt_law="marechal", tt_fixed_nm=None):
     """Single-beacon LGS or LTAO Strehl for one sample, at wavelength lam_nm.
 
     Parameters
@@ -582,6 +588,8 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                    see marechal.tilt_strehl. The high-order factor is
                    always Marechal. Only the sky-coverage tab passes
                    "hardy".
+    tt_fixed_nm  : a fixed tip-tilt term in place of the TT star's (see
+                   lgs_budget_terms). None -> the TT-star budget.
 
     Returns the Strehl at lam_nm (high-order x tip-tilt). The individual nm
     terms are available from lgs_budget_terms() with the same arguments.
@@ -591,7 +599,7 @@ def lgs_strehl(eps_total, eps_freeatm, telescope, mode, lam_nm=LAMBDA_K_NM,
                          v_ground, v_free, aniso_scale, tt_sensor=tt_sensor,
                          tt_spot_theta=tt_spot_theta, strap_law=strap_law,
                          ltao_tt_theta0_gain=ltao_tt_theta0_gain,
-                         lgs_flux_azel=lgs_flux_azel)
+                         lgs_flux_azel=lgs_flux_azel, tt_fixed_nm=tt_fixed_nm)
     ho = np.sqrt(t["alt"]**2 + t["ang"]**2 + t["fit"]**2 + t["bw"]**2
                  + t["scint"]**2 + t["meas"]**2 + t["nafoc"]**2
                  + t["stat_tel"]**2 + t["stat_calib"]**2 + t["stat_dm"]**2

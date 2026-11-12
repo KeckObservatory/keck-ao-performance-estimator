@@ -169,6 +169,11 @@ from .sky_coverage import (
     is_synthetic_field,
     load_sky_field, sky_coverage_curve, strehl_surface, synthetic_sky_field,
 )
+from .sky_map import (
+    ALLSKY_FIELD, ALLSKY_LABEL, ALLSKY_SENSORS, LASER_TT_MAS, TRUTH_MAG,
+    allsky_coverage, draw_sky_map, laser_strehl, load_allsky,
+    sky_probability,
+)
 from .starlist import (
     entry_float, format_starlist_line, parse_starlist, parse_starlist_text,
     same_star_name, write_starlist,
