@@ -101,7 +101,11 @@ class WfeTabMixin:
                 slider.setValue(int(default * SCALE))
                 slider.setToolTip(tip)
                 spin = _dspin(lo, hi, 0.5, default, 1, " nm")
-                spin.setMinimumWidth(70)
+                # the floor never exceeds the box's own natural minimum: Qt
+                # 6.12 (PyQt6 6.12.0, 2026-10-28) sizes some rows (HOMEAS)
+                # below 70 px, and a floor above the natural size would widen
+                # the row (gui_phase18's invariant)
+                spin.setMinimumWidth(min(70, spin.minimumSizeHint().width()))
                 spin.setToolTip(tip)
                 reset = QtWidgets.QPushButton("↺")
                 reset.setFixedWidth(28)

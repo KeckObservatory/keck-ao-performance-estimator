@@ -37,7 +37,7 @@ from qtcompat import QtWidgets
 import keck_ao_estimator as engine
 import keck_ao_estimator.gui as gui
 from keck_ao_estimator.budget import lgs_budget_terms, lgs_strehl
-from keck_ao_estimator.constants import NM_PER_MAS, REF_FREEATM, REF_TOTAL
+from keck_ao_estimator.constants import REF_FREEATM, REF_TOTAL
 from keck_ao_estimator.marechal import marechal_strehl, tilt_strehl
 np = engine.np
 
@@ -118,8 +118,8 @@ def engine_contract():
         pass
     else:
         raise AssertionError("an unknown sensor must raise")
-    print(f"  [ok] engine: tt_fixed_nm replaces only the tip-tilt term "
-          f"(None byte-identical); NGS ignores sensor / law / truth star")
+    print("  [ok] engine: tt_fixed_nm replaces only the tip-tilt term "
+          "(None byte-identical); NGS ignores sensor / law / truth star")
 
 
 def gui_tab():

@@ -42,6 +42,12 @@ Engine and tests:
   Strehl to an independent per-star calculation (STRAP 0.155, TRICK with
   STRAP fallback 0.411, truth star 0.888).
 
+Fixed:
+- **WFE slider number boxes under Qt 6.12** (PyQt6 6.12.0, 2026-10-28): their
+  70 px width floor is now capped at each box's own natural width, which
+  Qt 6.12 makes smaller for HOMEAS. Unchanged wherever 70 px already fit;
+  v1.6.0 fails `gui_phase18` on CI with Qt 6.12.
+
 ## 1.6.0 — 2026-10-25
 
 **The tool is now called KAPE.** Window title, About box, README and CLI help
