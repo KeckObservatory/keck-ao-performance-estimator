@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to KAPE, the Keck AO Performance Estimator. The
-project is released on GitHub only (pin `@v1.6.0` in the install URL).
+project is released on GitHub only (pin `@v1.7.0` in the install URL).
 
-## Unreleased
+## 1.7.0 — 2026-11-11
 
 **Sky coverage over the whole sky, as a curve and a map.** The Sky coverage
 tab gains an **All sky, dec ≥ −40° (Gaia DR3)** field.
@@ -12,6 +12,10 @@ tab gains an **All sky, dec ≥ −40° (Gaia DR3)** field.
   to 2MASS, plus the 2MASS stars Gaia lacks.
 - **Method:** field-star statistics on the same Strehl surface as the curves.
   On the bundled fields it agrees with the Monte Carlo to 0.008.
+- **Reading it:** the curve is a whole-sky average, so it sits well above
+  the high-latitude b = 60° field (K1 LTAO, STRAP, Hardy: Strehl ≥ 0.3 on
+  41 % of the sky against 13 %). At the same sight line the two agree to
+  about 2 points.
 
 With it come four additions:
 - **View → Map:** an equatorial Mollweide map of where a Strehl level is

@@ -46,7 +46,7 @@ You can also install straight from GitHub without cloning:
 pip install "keck-ao-performance-estimator[gui] @ git+https://github.com/KeckObservatory/keck-ao-performance-estimator"
 ```
 
-Pin a release with `...keck-ao-performance-estimator@v1.6.0` at the end of the
+Pin a release with `...keck-ao-performance-estimator@v1.7.0` at the end of the
 URL. If the tool is later published to PyPI, installation will simply be
 `pip install "keck-ao-performance-estimator[gui]"`.
 

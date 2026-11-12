@@ -5,7 +5,7 @@ Imported by the engine, the GUI, and the packaging metadata (pyproject.toml
 reads __version__ from here), so the version is defined in exactly one place.
 """
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 
 # the name in titles, the About box and the CLI (since 1.6.0); the package
 # stays keck_ao_estimator (PyAO vendors it) and the old commands remain
