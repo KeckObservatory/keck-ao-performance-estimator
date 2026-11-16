@@ -216,7 +216,7 @@ def check_ifs():
                        "PCUNAME": "osimg", "AXESTAT": "not controlling"})
     assert osiris_daytime(pcu) and instruments.get("osiris").frame_params(pcu).daytime
     assert not osiris_daytime(fits.Header({"PCUNAME": "telescope"}))
-    assert not osiris_daytime(fits.Header({"PCUNAME": "osimg", "AXESTAT": "tracking"}))
+    assert osiris_daytime(fits.Header({"PCUNAME": "osimg", "AXESTAT": "tracking"}))   # keckAOIDL #965: PCUNAME alone
     mos = fits.Header({"CURRINST": "MOSFIRE", "INSTR": "imag"})     # osrseng 2026-10-25
     assert instruments.identify(mos) is instruments.get("osiris")
     assert instruments.identify_frame(fits.Header({"CURRINST": "MOSFIRE"}),

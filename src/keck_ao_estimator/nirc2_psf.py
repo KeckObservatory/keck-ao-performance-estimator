@@ -84,8 +84,12 @@ def _fill_polygon(mask, rows, cols, value):
 
 
 def nirc2_pupil(npix=256, du=None, pmsname="largehex", pmrangl=0.0,
-                daytime=False, sfp=False):
-    """Binary NIRC2 pupil image, npix x npix, du meters/pixel at the primary."""
+                daytime=False, sfp=False, daytime_pupil_m=None):
+    """Binary NIRC2 pupil image, npix x npix, du meters/pixel at the primary.
+
+    `daytime_pupil_m` is the diameter of the bench (daytime) circle; None is
+    NIRC2's 11.0 m. The K1 OSIRIS tool uses 10.2 m (osiris.py).
+    """
     if du is None:
         du = 2.124e-6 / (npix * 0.00994 / 206265.0)
     pmsname = pmsname.strip().lower()
@@ -104,7 +108,8 @@ def nirc2_pupil(npix=256, du=None, pmsname="largehex", pmrangl=0.0,
         pupil[r * du < OSIRIS_WL_PUPIL_M / 2.0] = 1
         return pupil
     if daytime:
-        pupil[r * du <= NIRC2_DAYTIME_PUPIL_M / 2.0] = 1
+        diam = NIRC2_DAYTIME_PUPIL_M if daytime_pupil_m is None else float(daytime_pupil_m)
+        pupil[r * du <= diam / 2.0] = 1
         return pupil
 
     scale = du * NIRC2_PMS_M_PER_INCH       # inches per pupil-image pixel
@@ -159,7 +164,8 @@ def _block_mean(a, fac):
 
 def nirc2_dl_psf(camname="narrow", pmsname="largehex", effwave_um=2.1245,
                  pmrangl=0.0, npix=512, pos=(0.0, 0.0), daytime=False,
-                 sfp=False, return_pupil=False, plate_scale_mas=None):
+                 sfp=False, return_pupil=False, plate_scale_mas=None,
+                 daytime_pupil_m=None):
     """Diffraction-limited monochromatic NIRC2 PSF, normalized to unit sum.
 
     Port of nirc2psf.pro.  The half-pixel phase-ramp offset of the original
@@ -169,7 +175,8 @@ def nirc2_dl_psf(camname="narrow", pmsname="largehex", effwave_um=2.1245,
     `plate_scale_mas` samples the PSF at that pixel scale instead of the
     camera's (the OSIRIS spectrograph's 20 / 35 / 50 / 100 mas spaxels,
     osiris_ifs.py); None keeps the camera table, so every existing caller
-    is unchanged.
+    is unchanged.  `daytime_pupil_m` is the bench circle's diameter
+    (nirc2_pupil); None is NIRC2's 11.0 m.
     """
     camname = camname.strip().lower()
     pscl = _CAMERA_RAD_PER_PIX.get(camname, _CAMERA_RAD_PER_PIX["narrow"])
@@ -187,7 +194,8 @@ def nirc2_dl_psf(camname="narrow", pmsname="largehex", effwave_um=2.1245,
     du = lam_m / (npix2 * pscl1)
 
     pupil = nirc2_pupil(npix=npix2, du=du, pmsname=pmsname, pmrangl=pmrangl,
-                        daytime=daytime, sfp=sfp)
+                        daytime=daytime, sfp=sfp,
+                        daytime_pupil_m=daytime_pupil_m)
 
     xx = np.arange(npix2, dtype=float)[None, :]   # IDL x -> numpy axis 1
     yy = np.arange(npix2, dtype=float)[:, None]

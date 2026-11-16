@@ -1592,7 +1592,8 @@ def estimate_psf_shape(image, params, pos=None, *, halo_beta=None,
         dl_psf = nirc2_dl_psf(params.camname, params.pmsname,
                               params.effwave_um, params.pmrangl_deg,
                               npix=512, daytime=params.daytime,
-                              sfp=getattr(params, "sfp", False))
+                              sfp=getattr(params, "sfp", False),
+                              daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
     # The DL profile must be sampled at EXACTLY the radii the star's
     # profile used. Building it from the same `edges` list and filtering
     # separately misaligns the two -- the star skips bins that are short of
@@ -1726,7 +1727,8 @@ def theoretical_psf(params, sr, halo_fwhm_arcsec, *, halo_beta=None,
         dl_psf = nirc2_dl_psf(params.camname, params.pmsname,
                               params.effwave_um, params.pmrangl_deg,
                               npix=512, daytime=params.daytime,
-                              sfp=getattr(params, "sfp", False))
+                              sfp=getattr(params, "sfp", False),
+                              daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
     from scipy.ndimage import map_coordinates
     c = dl_psf.shape[0] / 2.0 - 0.5      # nirc2_dl_psf's own centring
     core = map_coordinates(
@@ -1798,7 +1800,8 @@ def epsf_strehl(model, params, dl_psf=None,
         dl_psf = nirc2_dl_psf(params.camname, params.pmsname,
                               params.effwave_um, params.pmrangl_deg,
                               npix=512, daytime=params.daytime,
-                              sfp=getattr(params, "sfp", False))
+                              sfp=getattr(params, "sfp", False),
+                              daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
     # identical arithmetic to measure_strehl's reference branch, so the
     # diagnostic is on the tool's own convention rather than a parallel one
     ctr = dl_psf.shape[0] // 2

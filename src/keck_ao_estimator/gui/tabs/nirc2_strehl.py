@@ -127,6 +127,11 @@ STRETCHES = ["IDL ±5σ", "linear %", "sqrt", "asinh", "log"]
 _DUP_POS_TOL_PX = 3.0
 
 
+def _osiris_destriped(params):
+    """True when the frame was destriped: an OSIRIS imager bench frame (instruments.reduce_frame)."""
+    return bool(getattr(params, "daytime", False)) and getattr(params, "camname", "") == "osiris"
+
+
 def _resolve_workers_safe():
     """`resolve_workers(None)`, defensively (PR-CP3 acceptance, Opus
     2026-09-13, B1): an invalid `$KECK_AO_WORKERS` (unparseable, 0,
@@ -2166,7 +2171,8 @@ class Nirc2StrehlTabMixin:
             p = self._n2_params
             self._n2_dl = engine.nirc2_dl_psf(
                 p.camname, p.pmsname, p.effwave_um, p.pmrangl_deg, npix=512,
-                daytime=p.daytime, sfp=p.sfp)
+                daytime=p.daytime, sfp=p.sfp,
+                daytime_pupil_m=getattr(p, "daytime_pupil_m", None))
         clean = self._nirc2_pick_psf_clean()
         result = engine.measure_strehl(
             self._n2_image, params=self._n2_params, pos=(x, y),
@@ -2211,7 +2217,8 @@ class Nirc2StrehlTabMixin:
                            engine.nirc2_dl_psf(
                                p.camname, p.pmsname, p.effwave_um,
                                p.pmrangl_deg, npix=512, daytime=p.daytime,
-                               sfp=p.sfp))
+                               sfp=p.sfp,
+                               daytime_pupil_m=getattr(p, "daytime_pupil_m", None)))
         if self._n2_ifs_valid is not None:
             return osiris_ifs.measure_ifs(
                 self._n2_image, self._n2_ifs_valid, self._n2_params,
@@ -3878,7 +3885,8 @@ class Nirc2StrehlTabMixin:
             f"Image {self._n2_imno} — "
             f"{self._nirc2_mode_text(result.params)} — "
             f"{self._nirc2_wave_text(result.params)}"
-            + (" — PCU source" if result.params.daytime else ""), result)
+            + (" — PCU source" if result.params.daytime else "")
+            + (", destriped" if _osiris_destriped(result.params) else ""), result)
         self._nirc2_draw_main()
         # warnings live UNDER the cutouts (Eduardo 2026-07-23), symptom
         # first, then cause: out-of-(0,1] SR is impossible, and annulus
@@ -4135,6 +4143,8 @@ class Nirc2StrehlTabMixin:
             flags.append("coadd-short-exposure-sr")
         if result.params.daytime:
             flags.append("pcu-source")
+        if _osiris_destriped(result.params):
+            flags.append("destriped")     # OSIRIS bench frame: row/column stripes removed (osiris_destripe.py)
         return ",".join(flags)
 
     @staticmethod

@@ -119,6 +119,9 @@ class Nirc2FrameParams:
     trick_active: bool | None = None  # DYYMASTR/DTSENSOR: TRICK (vs STRAP)
                                       #   was the real TT sensor for this
                                       #   frame, see trick_sensor_active()
+    daytime_pupil_m: float = NIRC2_DAYTIME_PUPIL_M  # bench (daytime) pupil
+                                      #   circle diameter, m: K2 11.0,
+                                      #   K1 OSIRIS 10.2 (osiris.py)
 
 
 def opt_header_float(header, key):

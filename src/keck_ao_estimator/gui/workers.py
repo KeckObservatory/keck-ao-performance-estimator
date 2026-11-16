@@ -446,7 +446,7 @@ class Nirc2MeasureWorker(QThread):
                 # OSIRIS: the full frame for the GUI (Eduardo: show the
                 # whole detector, not the tool's central-1024 crop)
                 reduced = inst.reduce_frame(raw, background=bg, flat=flat,
-                                            mask=mask)
+                                            mask=mask, params=params)
                 if cal_error is not None:
                     self.frame_done.emit(no, _failed(params, cal_error),
                                          params, reduced, None, header)

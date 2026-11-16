@@ -204,6 +204,7 @@ def ifs_dl_psf(params, npix=512):
     return nirc2_dl_psf("narrow", params.pmsname, params.effwave_um,
                         params.pmrangl_deg, npix=npix,
                         daytime=params.daytime,
+                        daytime_pupil_m=getattr(params, "daytime_pupil_m", None),
                         plate_scale_mas=params.plate_scale_mas)
 
 
@@ -340,7 +341,7 @@ def measure_ifs(image, valid, params, pos=None,
     from .model_fwhm import fit_model_fwhm
     fit = fit_model_fwhm(image, x, y, ps, params.effwave_um, valid=valid,
                          pmsname=params.pmsname, pmrangl_deg=params.pmrangl_deg,
-                         daytime=params.daytime)
+                         daytime=params.daytime, daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
     if fit.ok:
         fwhm, fwhm_dl = fit.fwhm_mas, fit.fwhm_dl_mas
         if fit.note:

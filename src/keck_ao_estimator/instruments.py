@@ -199,8 +199,12 @@ class Instrument:
             return None, None
         return _generic_calibration(self)
 
-    def reduce_frame(self, raw, background=None, flat=None, mask=None):
-        """Reduce a raw frame for display and measurement."""
+    def reduce_frame(self, raw, background=None, flat=None, mask=None, params=None):
+        """Reduce a raw frame for display and measurement.
+
+        `params` (frame_params of the frame's header) lets OSIRIS bench
+        frames (params.daytime) be destriped as the K1 tool does them;
+        without it no frame is destriped."""
         import numpy as np
 
         from . import image_strehl
@@ -209,7 +213,9 @@ class Instrument:
             return image_strehl.reduce_frame(raw, background=background,
                                              flat=flat, badmask=mask)
         if model == "osiris":
-            return image_strehl.osiris_reduce(raw, crop=False)
+            return image_strehl.osiris_reduce(
+                raw, crop=False,
+                destripe=bool(params is not None and params.daytime))
         if model == "osiris_ifs":
             # display only: the cube's mean over wavelength (the workers
             # measure cubes with osiris_ifs.collapse and their quality map)
@@ -249,7 +255,8 @@ class Instrument:
         """What the diffraction-limited PSF depends on (a cache key)."""
         return (self.key, params.camname, params.pmsname,
                 round(params.effwave_um, 6), round(params.pmrangl_deg, 3),
-                params.daytime, params.sfp, params.plate_scale_mas)
+                params.daytime, params.sfp, params.plate_scale_mas,
+                getattr(params, "daytime_pupil_m", None))
 
     def dl_psf(self, params, npix=512):
         """The diffraction-limited PSF on the detector grid, unit sum."""
@@ -261,7 +268,7 @@ class Instrument:
             return nirc2_dl_psf(params.camname, params.pmsname,
                                 params.effwave_um, params.pmrangl_deg,
                                 npix=npix, daytime=params.daytime,
-                                sfp=params.sfp)
+                                sfp=params.sfp, daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
         if self.pupil["model"] == "orkid":
             from .orkid import orkid_dl_psf
             return orkid_dl_psf(params.effwave_um, params.plate_scale_mas,

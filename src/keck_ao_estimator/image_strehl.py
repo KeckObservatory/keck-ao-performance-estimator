@@ -789,7 +789,8 @@ def measure_strehl(image, params=None, header=None, pos=None,
         dl_psf = nirc2_dl_psf(params.camname, params.pmsname,
                               params.effwave_um, params.pmrangl_deg,
                               npix=512, daytime=params.daytime,
-                              sfp=getattr(params, "sfp", False))
+                              sfp=getattr(params, "sfp", False),
+                              daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
     # matched apertures: strehlone below is computed with the SAME
     # photrad as the star, so an optimized radius stays self-consistent
     ctr = dl_psf.shape[0] // 2
@@ -999,7 +1000,7 @@ def measure_strehl(image, params=None, header=None, pos=None,
         if _rep is not None else False)
 
 
-def osiris_reduce(raw, background=None, crop=True):
+def osiris_reduce(raw, background=None, crop=True, destripe=False):
     """OSIRIS reduction (find_strehl.pro, K1 fork): full 2048x2048 frames
     are cropped to the central 1024x1024, smaller reads are centred into
     a 2048 canvas (the upstream corner-anchored embed looks buggy; we
@@ -1008,21 +1009,35 @@ def osiris_reduce(raw, background=None, crop=True):
 
     crop=False keeps full 2048 frames whole (the GUI shows the entire
     detector; the measurement itself is crop-independent) -- the IDL
-    tool's crop remains the default for golden fidelity."""
-    def _prep(a):
+    tool's crop remains the default for golden fidelity.
+
+    destripe=True (bench frames; keckAOIDL #966, 2026-11-13) removes the
+    detector row/column offsets after fix_image (osiris_destripe.py). The
+    K1 tool does this on the whole 2048 frame (it no longer crops), so
+    here the whole frame is reduced and destriped first and only then cut
+    to the centre when `crop`."""
+    def _prep(a, cut):
+        """`a` as float on the 2048 x 2048 detector (a smaller frame centred in zeros); a full frame is cut to its central 1024 x 1024 when `cut`."""
         a = np.asarray(a, dtype=float)
         if a.shape[0] == 2048 and a.shape[1] == 2048:
-            return a[512:1536, 512:1536] if crop else a
+            return a[512:1536, 512:1536] if cut else a
         out = np.zeros((2048, 2048))
         ys, xs = a.shape
         bly, blx = 1024 - ys // 2, 1024 - xs // 2
         out[bly:bly + ys, blx:blx + xs] = a
         return out
 
-    red = _prep(raw)
+    cut_first = crop and not destripe
+    red = _prep(raw, cut_first)
     if background is not None:
-        red = red - _prep(background)
-    return fix_image(red)
+        red = red - _prep(background, cut_first)
+    red = fix_image(red)
+    if not destripe:
+        return red
+    from .osiris_destripe import osiris_destripe
+    red = osiris_destripe(red)
+    full = np.asarray(raw).shape[0] == 2048 and np.asarray(raw).shape[1] == 2048
+    return red[512:1536, 512:1536] if crop and full else red
 
 
 def aperture_edge_clip_frac(shape, x, y, r_px):
@@ -1274,7 +1289,8 @@ def measure_field(image, params, positions=None, n_stars=5,
         dl_psf = nirc2_dl_psf(params.camname, params.pmsname,
                               params.effwave_um, params.pmrangl_deg,
                               npix=512, daytime=params.daytime,
-                              sfp=getattr(params, "sfp", False))
+                              sfp=getattr(params, "sfp", False),
+                              daytime_pupil_m=getattr(params, "daytime_pupil_m", None))
     # The ePSF and the deep neighbour catalogue are properties of the
     # FIELD, so they are built once here and shared across every star --
     # exactly as dl_psf already is.  Rebuilding per star would be slow and,
@@ -1378,10 +1394,16 @@ def measure_field(image, params, positions=None, n_stars=5,
 
 
 def measure_osiris_frame(path, background=None, pos=None, sfp=False,
-                         **kwargs):
+                         crop=True, destripe=None, **kwargs):
     """Load a raw OSIRIS imager frame, reduce it the K1 tool's way
     (osiris_reduce), and measure.  No saturation ceiling exists in the
-    OSIRIS tool, so the result never flags saturated."""
+    OSIRIS tool, so the result never flags saturated.
+
+    `destripe` None follows the K1 tool: bench frames (params.daytime,
+    PCUNAME not 'telescope') are destriped, sky frames are not; True or
+    False forces it.  `crop` False measures on the whole 2048 detector, as
+    the GUI and the K1 tool since keckAOIDL #932 do (positions are then
+    detector pixels; cropped ones are 512 less)."""
     from astropy.io import fits
 
     from .osiris import osiris_frame_params
@@ -1390,7 +1412,10 @@ def measure_osiris_frame(path, background=None, pos=None, sfp=False,
         raw = np.asarray(hdul[0].data, dtype=float)
         header = hdul[0].header
     params = osiris_frame_params(header, sfp=sfp)
-    red = osiris_reduce(raw, background=background)
+    if destripe is None:
+        destripe = params.daytime
+    red = osiris_reduce(raw, background=background, crop=crop,
+                        destripe=bool(destripe))
     return measure_strehl(red, params=params, pos=pos,
                           background_subtracted=background is not None,
                           **kwargs)
