@@ -18,8 +18,9 @@ only the front end differs:
   by the fiber's mode field (10.4 / 12.6 um, the K2 PCU's numbers, which
   the K1 tool also uses). This follows the K1 tool since keckAOIDL #965
   (asurendran 2026-11-12): bench or sky per image from PCUNAME, the bench
-  pupil 10.2 m ("the bench OSIRIS images fit a ~10 m filled circular
-  pupil"; NIRC2's stays 11.0 m);
+  pupil 10.2 m (measured by asurendran from defocused images of the PCU
+  source: "the bench OSIRIS images fit a ~10 m filled circular pupil";
+  NIRC2's stays 11.0 m);
 - bench frames lose their detector row/column stripes after the background
   subtraction (osiris_destripe.py, keckAOIDL #966, 2026-11-13);
 - no flat, no bad-pixel mask, and no saturation ceiling: reduction is

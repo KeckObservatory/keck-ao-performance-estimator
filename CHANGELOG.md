@@ -10,8 +10,9 @@ project is released on GitHub only (pin `@v1.7.1` in the install URL).
 - **Bench or sky:** a frame is a bench (PCU fiber) frame when PCUNAME is
   anything but `telescope`, whatever the telescope is doing. Until now it
   also had to be not tracking. No local OSIRIS frame changes classification.
-- **Bench pupil:** the OSIRIS bench reference is a 10.2 m circle (IDL's
-  number, not yet checked against data here). NIRC2 and ORKID keep 11.0 m.
+- **Bench pupil:** the OSIRIS bench reference is a 10.2 m circle, the K1
+  tool's value, measured by asurendran from defocused images of the PCU
+  source. NIRC2 and ORKID keep 11.0 m.
   The new `daytime_pupil_m` frame parameter carries the diameter.
 - **Stripes:** bench frames lose the H2RG row and column offsets
   (`osiris_destripe.py`). Column medians, then row medians, are measured
