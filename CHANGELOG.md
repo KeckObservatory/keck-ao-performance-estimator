@@ -3,7 +3,7 @@
 All notable changes to KAPE, the Keck AO Performance Estimator. The
 project is released on GitHub only (pin `@v1.7.1` in the install URL).
 
-## 1.7.1 — 2026-11-16
+## 1.7.1 — 2026-11-24
 
 **OSIRIS bench frames measured as the K1 IDL tool does since keckAOIDL
 #965/#966 (2026-11-12/13).** In the Measured SR tool:
